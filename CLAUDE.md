@@ -525,12 +525,23 @@ Vue 组件：
 | 评估报告 | docs/eval/ | 每次发版 |
 | 进度记录 | docs/progress/m{N}.md | 任务完成时 |
 | 部署文档 | docs/deployment.md | 部署方式变更时 |
+| 决策记录 | docs/decisions/{YYYY-MM-DD}-{主题}.md | 每次重要对话/决策/审查后 |
 
 ### 13.2 文档与代码一致性
 
 - 接口变更必须同步更新 docs/api/openapi.yaml
 - 表结构变更必须同步更新 spec §5.2
 - 模型版本变更必须同步更新 model_registry 表 + spec §4.7
+
+### 13.3 决策记录（docs/decisions/）
+
+每次完成以下类型的对话后，将关键结论归档：
+- 审查（设计审查、代码审查）
+- 架构/技术选型决策
+- 里程碑阶段总结
+- 重大 bug 分析与修复记录
+
+格式：`{YYYY-MM-DD}-{简短主题}.md`，内容包含：背景、决策列表、已完成的 checklist、发现的风险、下一步行动项。
 
 ---
 
