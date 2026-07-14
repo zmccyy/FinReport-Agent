@@ -57,6 +57,13 @@
             <artifactId>r2dbc-mysql</artifactId>
         </dependency>
 
+        <!-- MySQL JDBC Driver (Flyway 需要) -->
+        <dependency>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+
         <!-- Flyway (JDBC, 独立 DataSource) -->
         <dependency>
             <groupId>org.flywaydb</groupId>
