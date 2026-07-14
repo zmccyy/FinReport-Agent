@@ -60,6 +60,11 @@ public class JwtFilter implements WebFilter {
             String username = jwtUtil.getUsername(token);
             log.debug("[JwtFilter] 用户认证成功 userId={} username={}", userId, username);
 
+            if (userId == null || username == null) {
+                log.warn("[JwtFilter] Token 有效但缺少 userId 或 username claim，放行（M1.07）");
+                return chain.filter(exchange);
+            }
+
             // 注入用户信息到请求属性
             ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
                     .header("X-User-Id", userId.toString())

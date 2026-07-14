@@ -2,14 +2,11 @@ package com.finreport.config;
 
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.reactive.config.CorsRegistry;
-import org.springframework.web.reactive.config.EnableWebFlux;
 import org.springframework.web.reactive.config.WebFluxConfigurer;
 
-/**
- * WebFlux 配置 — CORS 等跨域设置。
- */
+// 注：不启用 @EnableWebFlux，由 Spring Boot 自动配置接管。
+// 仅实现 WebFluxConfigurer 追加自定义设置，避免覆盖 Boot 的默认 WebFlux 配置。
 @Configuration
-@EnableWebFlux
 public class WebFluxConfig implements WebFluxConfigurer {
 
     /** CORS 预检缓存时间（秒） */
