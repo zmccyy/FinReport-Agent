@@ -1,5 +1,6 @@
 package com.finreport.security;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 
 import javax.crypto.SecretKey;
@@ -30,7 +31,7 @@ public class JwtUtil {
 
     public JwtUtil(JwtConfig jwtConfig) {
         this.jwtConfig = jwtConfig;
-        this.secretKey = Keys.hmacShaKeyFor(jwtConfig.getSecret().getBytes());
+        this.secretKey = Keys.hmacShaKeyFor(jwtConfig.getSecret().getBytes(StandardCharsets.UTF_8));
         log.debug("[JwtUtil] JWT 签名密钥已加载");
     }
 
@@ -61,6 +62,7 @@ public class JwtUtil {
      */
     public Claims parseToken(String token) {
         return Jwts.parser()
+                .requireIssuer(jwtConfig.getIssuer())
                 .verifyWith(secretKey)
                 .build()
                 .parseSignedClaims(token)

@@ -1,15 +1,14 @@
 package com.finreport.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
 
 /**
  * JWT 配置属性。
  *
  * <p>从 application.yml 的 {@code jwt} 前缀读取。
- * M1.08 启用认证后使用。</p>
+ * M1.08 启用认证后使用。
+ * 通过 @EnableConfigurationProperties 在 FinReportApplication 中注册。</p>
  */
-@Configuration
 @ConfigurationProperties(prefix = "jwt")
 public class JwtConfig {
 

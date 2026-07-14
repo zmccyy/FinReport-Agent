@@ -91,6 +91,7 @@ services:
       - "${MINIO_CONSOLE_PORT:-9001}:9001"   # Web Console
     volumes:
       - minio_data:/data
+      - ./minio/init.sh:/data/init.sh:ro
     networks:
       - finreport-net
     healthcheck:

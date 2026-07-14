@@ -17,4 +17,8 @@ public class AuthException extends BusinessException {
     public AuthException(HttpStatus status, String errorCode, String message) {
         super(status, errorCode, message);
     }
+
+    public AuthException(String errorCode, String message, Throwable cause) {
+        super(HttpStatus.UNAUTHORIZED, errorCode, message, cause);
+    }
 }

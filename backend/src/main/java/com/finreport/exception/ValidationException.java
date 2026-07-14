@@ -17,4 +17,8 @@ public class ValidationException extends BusinessException {
     public ValidationException(String errorCode, String message) {
         super(HttpStatus.UNPROCESSABLE_ENTITY, errorCode, message);
     }
+
+    public ValidationException(String errorCode, String message, Throwable cause) {
+        super(HttpStatus.UNPROCESSABLE_ENTITY, errorCode, message, cause);
+    }
 }
