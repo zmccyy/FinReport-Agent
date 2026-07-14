@@ -1,11 +1,260 @@
 {
   "rabbit_version": "3.13",
   "vhosts": [
-    { "name": "/" }
+    {
+      "name": "/"
+    }
   ],
-  "permissions": [],
+  "permissions": [
+    {
+      "user": "guest",
+      "vhost": "/",
+      "configure": ".*",
+      "write": ".*",
+      "read": ".*"
+    }
+  ],
   "policies": [],
-  "queues": [],
-  "exchanges": [],
-  "bindings": []
+  "queues": [
+    {
+      "name": "q.parse.requests",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "q.parse.requests.dlq"
+      }
+    },
+    {
+      "name": "q.parse.requests.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 604800000,
+        "x-max-length": 10000
+      }
+    },
+    {
+      "name": "q.extract.requests",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "q.extract.requests.dlq"
+      }
+    },
+    {
+      "name": "q.extract.requests.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 604800000,
+        "x-max-length": 10000
+      }
+    },
+    {
+      "name": "q.reason.requests",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "q.reason.requests.dlq"
+      }
+    },
+    {
+      "name": "q.reason.requests.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 604800000,
+        "x-max-length": 10000
+      }
+    },
+    {
+      "name": "q.progress.results",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "q.progress.results.dlq"
+      }
+    },
+    {
+      "name": "q.progress.results.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 604800000,
+        "x-max-length": 10000
+      }
+    },
+    {
+      "name": "q.chat.requests",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "q.chat.requests.dlq"
+      }
+    },
+    {
+      "name": "q.chat.requests.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 604800000,
+        "x-max-length": 10000
+      }
+    },
+    {
+      "name": "q.kb.build",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-dead-letter-exchange": "",
+        "x-dead-letter-routing-key": "q.kb.build.dlq"
+      }
+    },
+    {
+      "name": "q.kb.build.dlq",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 604800000,
+        "x-max-length": 10000
+      }
+    }
+  ],
+  "exchanges": [
+    {
+      "name": "task.exchange",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "progress.exchange",
+      "vhost": "/",
+      "type": "fanout",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "chat.exchange",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "kb.exchange",
+      "vhost": "/",
+      "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    }
+  ],
+  "bindings": [
+    {
+      "source": "task.exchange",
+      "vhost": "/",
+      "destination": "q.parse.requests",
+      "destination_type": "queue",
+      "routing_key": "parse",
+      "arguments": {}
+    },
+    {
+      "source": "task.exchange",
+      "vhost": "/",
+      "destination": "q.extract.requests",
+      "destination_type": "queue",
+      "routing_key": "extract.bs",
+      "arguments": {}
+    },
+    {
+      "source": "task.exchange",
+      "vhost": "/",
+      "destination": "q.extract.requests",
+      "destination_type": "queue",
+      "routing_key": "extract.is",
+      "arguments": {}
+    },
+    {
+      "source": "task.exchange",
+      "vhost": "/",
+      "destination": "q.extract.requests",
+      "destination_type": "queue",
+      "routing_key": "extract.cf",
+      "arguments": {}
+    },
+    {
+      "source": "task.exchange",
+      "vhost": "/",
+      "destination": "q.reason.requests",
+      "destination_type": "queue",
+      "routing_key": "check",
+      "arguments": {}
+    },
+    {
+      "source": "task.exchange",
+      "vhost": "/",
+      "destination": "q.reason.requests",
+      "destination_type": "queue",
+      "routing_key": "report",
+      "arguments": {}
+    },
+    {
+      "source": "progress.exchange",
+      "vhost": "/",
+      "destination": "q.progress.results",
+      "destination_type": "queue",
+      "routing_key": "",
+      "arguments": {}
+    },
+    {
+      "source": "chat.exchange",
+      "vhost": "/",
+      "destination": "q.chat.requests",
+      "destination_type": "queue",
+      "routing_key": "chat",
+      "arguments": {}
+    },
+    {
+      "source": "kb.exchange",
+      "vhost": "/",
+      "destination": "q.kb.build",
+      "destination_type": "queue",
+      "routing_key": "kb.build.report",
+      "arguments": {}
+    },
+    {
+      "source": "kb.exchange",
+      "vhost": "/",
+      "destination": "q.kb.build",
+      "destination_type": "queue",
+      "routing_key": "kb.build.industry",
+      "arguments": {}
+    }
+  ]
 }

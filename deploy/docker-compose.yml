@@ -68,6 +68,7 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
       - ./rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - ./rabbitmq/definitions.json:/etc/rabbitmq/definitions.json:ro
     networks:
       - finreport-net
     healthcheck:
