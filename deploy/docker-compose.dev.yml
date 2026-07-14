@@ -1,0 +1,125 @@
+# FinReport Agent — Docker Compose 开发覆盖
+# 用法：docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# 版本：v1.0 | 日期：2026-07-14
+
+services:
+  # ================================================================================
+  # 基础设施 — 开发环境放宽限制
+  # ================================================================================
+
+  mysql:
+    ports:
+      - "3306:3306" # 允许宿主机直连调试
+    environment:
+      MYSQL_ROOT_PASSWORD: finreport
+      MYSQL_DATABASE: finreport
+    # 不做资源限制
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  rabbitmq:
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    # 开发模式允许 guest 远程访问
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+      RABBITMQ_LOGS: "-"
+
+  minio:
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+  etcd:
+    # 开发环境降低资源消耗
+    environment:
+      ETCD_QUOTA_BACKEND_BYTES: "1073741824" # 1GB for dev
+
+  milvus:
+    # 开发环境降低资源消耗
+    environment:
+      KNOWHERE_BUILD_LEVEL: "1" # 快速索引（牺牲精度）
+
+  # ================================================================================
+  # 应用服务 — 挂载源码 + 热重载
+  # ================================================================================
+
+  ai-service:
+    build:
+      target: dev # 多阶段构建的 dev 阶段
+    volumes:
+      - ../ai-service/app:/app/app:ro     # 源码只读挂载
+      - ../ai-service/pyproject.toml:/app/pyproject.toml:ro
+      - models:/models:ro
+      - ai_cache:/root/.cache             # pip/模型缓存持久化
+    environment:
+      AI_SERVICE_DEBUG: "true"
+      AI_SERVICE_RELOAD: "true"           # uvicorn --reload
+      LOG_LEVEL: DEBUG
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --reload-dir /app/app
+      --log-level debug
+    healthcheck:
+      start_period: 15s # 开发模式更快启动
+
+  backend:
+    build:
+      target: dev
+    volumes:
+      - ../backend/src:/app/src:ro
+      - ../backend/pom.xml:/app/pom.xml:ro
+      - backend_m2:/root/.m2             # Maven 缓存持久化
+    environment:
+      JAVA_OPTS: >
+        -Xms256m -Xmx512m
+        -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
+        -Dspring.devtools.restart.enabled=true
+        -Dspring.devtools.livereload.enabled=false
+      LOG_LEVEL: DEBUG
+    ports:
+      - "8080:8080"
+      - "5005:5005"                       # Java 远程调试端口
+    command: >
+      ./mvnw spring-boot:run
+      -Dspring-boot.run.jvmArguments="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
+    healthcheck:
+      start_period: 30s
+
+  frontend:
+    build:
+      target: dev
+    volumes:
+      - ../frontend/src:/app/src:ro
+      - ../frontend/public:/app/public:ro
+      - ../frontend/index.html:/app/index.html:ro
+      - ../frontend/vite.config.ts:/app/vite.config.ts:ro
+      - frontend_node_modules:/app/node_modules
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080
+      VITE_SSE_BASE_URL: http://localhost:8080
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "80:5173"                         # Vite dev server on port 80 mapping
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:5173/"]
+      start_period: 20s
+
+# ================================================================================
+# 开发专用卷
+# ================================================================================
+
+volumes:
+  ai_cache:
+    name: finreport-ai-cache
+  backend_m2:
+    name: finreport-backend-m2
+  frontend_node_modules:
+    name: finreport-frontend-node-modules

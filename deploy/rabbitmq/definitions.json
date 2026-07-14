@@ -1,0 +1,11 @@
+{
+  "rabbit_version": "3.13",
+  "vhosts": [
+    { "name": "/" }
+  ],
+  "permissions": [],
+  "policies": [],
+  "queues": [],
+  "exchanges": [],
+  "bindings": []
+}
