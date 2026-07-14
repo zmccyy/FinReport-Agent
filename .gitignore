@@ -1,0 +1,93 @@
+# ===== FinReport Agent .gitignore =====
+
+# --- 模型权重 & 大数据文件 ---
+models/
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
+*.ckpt
+*.onnx
+!models/.gitkeep
+
+# --- LoRA adapter ---
+adapter_*
+*.adapter
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+.conda/
+*.whl
+
+# --- Java ---
+*.class
+*.jar
+*.war
+target/
+.mvn/wrapper/maven-wrapper.jar
+!.mvn/wrapper/maven-wrapper.properties
+
+# --- Maven ---
+pom.xml.versionsBackup
+
+# --- Node / Vue ---
+node_modules/
+dist/
+.output/
+.nuxt/
+*.tsbuildinfo
+
+# --- IDE ---
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# --- Docker ---
+docker-compose.override.yml
+
+# --- Env & Secrets ---
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+application-local.yml
+
+# --- Data (keep structure, ignore runtime) ---
+data/raw_reports/
+data/training/
+!data/raw_reports/.gitkeep
+!data/training/.gitkeep
+
+# --- Logs ---
+*.log
+logs/
+
+# --- OS ---
+*.tmp
+*.temp
+
+# --- Misc ---
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+coverage/
+htmlcov/
+.nyc_output/
