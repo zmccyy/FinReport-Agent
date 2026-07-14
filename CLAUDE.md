@@ -21,7 +21,7 @@
 
 | 组件 | 版本 | 说明 |
 |---|---|---|
-| Java | 17 | LTS |
+| Java | 21 | LTS |
 | SpringBoot | 3.2.x | WebFlux + Security |
 | Python | 3.11 | AI 服务 |
 | PyTorch | 2.3.x + CUDA 12.1 | 必须 4-bit 量化 |
@@ -55,7 +55,7 @@
 | 设计文档模块 | 实现位置 |
 |---|---|
 | M1 接入网关 | backend/.../controller/AuthController.java |
-| M2 任务编排 | backend/.../service/orchestrator/ |
+| M2 任务编排 | backend/.../service/orchestrator/ | 状态机详见 spec §3.2.1 |
 | M3 会话与 SSE | backend/.../service/sse/ |
 | M4 文件与产物 | backend/.../service/file/ |
 | M5 审计与配置 | backend/.../service/audit/ |

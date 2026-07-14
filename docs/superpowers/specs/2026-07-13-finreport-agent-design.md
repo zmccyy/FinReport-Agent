@@ -51,7 +51,7 @@
 
 ### 0.5 技术栈概览
 
-- **主后端**：Java 17 + SpringBoot 3.x + Spring WebFlux + Spring Security
+- **主后端**：Java 21 + SpringBoot 3.x + Spring WebFlux + Spring Security
 - **AI 服务**：Python 3.11 + FastAPI + PyTorch 2.x
 - **前端**：Vue3 + Element Plus + ECharts
 - **消息队列**：RabbitMQ
@@ -370,6 +370,81 @@ RabbitMQ 用 4 类 exchange + 6 个核心队列：
 - 三表并行天然实现：3 条 `extract.*` 消息由 3 个独立 worker 消费（prefetch=1 防显存抢占）
 - L2 用 `ConcurrentNavigableMap<taskId, SseEmitter>` 维护活跃 SSE 连接，收到 progress 消息时按 `taskId` 路由
 - **任务编排从"同步等"变成"事件驱动"**：L2 监听 progress 事件，在 EXTRACT 三条都到达后自动触发 CHECK（用 `AtomicInteger` 计数 + Redis 状态机）
+
+#### 3.2.1 任务状态机（完整定义）
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: 创建任务
+
+    PENDING --> PARSE_RUNNING: 发布 parse 消息
+    PARSE_RUNNING --> PARSE_SUCCESS: M6 解析完成
+    PARSE_RUNNING --> PARSE_FAILED: 超时/M6 报错
+    PARSE_FAILED --> PARSE_RETRY: 重试次数 < 3
+    PARSE_RETRY --> PARSE_RUNNING: 重新发布 parse 消息
+    PARSE_FAILED --> FAILED: 重试耗尽
+
+    PARSE_SUCCESS --> EXTRACT_RUNNING: 并发发布 3 条 extract 消息
+    EXTRACT_RUNNING --> EXTRACT_PARTIAL: 部分完成(等待其余)
+    EXTRACT_PARTIAL --> EXTRACT_SUCCESS: 3 条全部 SUCCESS
+    EXTRACT_PARTIAL --> EXTRACT_FAILED: 任意 1 条 FAILED
+    EXTRACT_FAILED --> EXTRACT_RETRY: 重试次数 < 3(仅重试失败的)
+    EXTRACT_RETRY --> EXTRACT_RUNNING: 重新发布失败的 extract
+    EXTRACT_FAILED --> FAILED: 重试耗尽
+
+    EXTRACT_SUCCESS --> CHECK_RUNNING: 发布 check 消息
+    CHECK_RUNNING --> CHECK_SUCCESS: M8 勾稽完成
+    CHECK_RUNNING --> CHECK_FAILED: 超时/M8 报错
+    CHECK_FAILED --> CHECK_RETRY: 重试次数 < 3
+    CHECK_RETRY --> CHECK_RUNNING: 重新发布 check 消息
+    CHECK_FAILED --> FAILED: 重试耗尽
+
+    CHECK_SUCCESS --> REPORT_RUNNING: 发布 report 消息
+    REPORT_RUNNING --> REPORT_SUCCESS: M10 报告生成完成
+    REPORT_RUNNING --> REPORT_FAILED: 超时/M10 报错
+    REPORT_FAILED --> REPORT_RETRY: 重试次数 < 3
+    REPORT_RETRY --> REPORT_RUNNING: 重新发布 report
+    REPORT_FAILED --> FAILED: 重试耗尽
+
+    REPORT_SUCCESS --> COMPLETED: 任务完成
+
+    state CANCELLED {
+        [*] --> cancel_pending: 用户请求取消
+        cancel_pending --> worker_notified: L2 发 cancel 消息
+        worker_notified --> resources_cleaned: L3 停止并 ack
+    }
+
+    PENDING --> CANCELLED: 用户取消
+    PARSE_RUNNING --> CANCELLED: 用户取消
+    EXTRACT_RUNNING --> CANCELLED: 用户取消
+    CHECK_RUNNING --> CANCELLED: 用户取消
+    REPORT_RUNNING --> CANCELLED: 用户取消
+```
+
+**状态转换规则**：
+
+| 转换 | 条件 |
+|---|---|
+| *_RUNNING → *_RETRY | MQ 消息 nack(requeue=true)，重试次数 < 3 |
+| *_RETRY → *_RUNNING | 指数退避后重新投递（1s → 2s → 4s） |
+| *_FAILED → FAILED | 重试次数 >= 3 + 降级也失败 |
+| 任意状态 → CANCELLED | L2 通过 Redis `fin:cancel:{taskId}` 发布取消信号，L3 worker 轮询检测 |
+| CANCELLED 后 | 已写入数据保留不清除，task.status=CANCELLED |
+
+**EXTRACT 三表并行的特殊规则**：
+
+- 3 条 extract 消息（bs/is/cf）各自独立状态，但对外暴露为 EXTRACT 聚合状态
+- BS/IS/CF 各有一条独立的 EXTRACT_FAILED → EXTRACT_RETRY 路径
+- 只有 3 条全部 SUCCESS 才进入 CHECK
+- 任意 1 条 final FAILED → 整任务 FAILED
+- 已成功抽取的表（如 BS）的数据已写入 `financial_statement`，不做回滚（保留供排查）
+
+**超时与补偿**：
+
+- L2 `ScheduledExecutor` 每 30s 检查 RUNNING 状态超过 2×SLA 的任务
+- 超时未收到 progress → 通过 Redis `fin:task:heartbeat:{taskId}` 检查 L3 是否存活
+- L3 无心跳 → 发补偿消息查询；仍无响应 → 标记 FAILED
+- MQ 消息投递后 10s 未 confirm → 写入 `outbox` 表 → 后台补偿重投
 
 ### 3.3 链路 B：问答对话链路（MQ + 流式混合）
 
