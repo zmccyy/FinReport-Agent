@@ -64,6 +64,13 @@ minio:
   access-key: ${MINIO_ACCESS_KEY:minioadmin}
   secret-key: ${MINIO_SECRET_KEY:minioadmin}
 
+# --- JWT ---
+jwt:
+  secret: ${JWT_SECRET:finreport-jwt-secret-key-change-in-production-min-256-bits}
+  access-expiration: ${JWT_ACCESS_EXPIRATION:3600}
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800}
+  issuer: finreport
+
 # --- AI Service ---
 ai-service:
   base-url: ${AI_SERVICE_URL:http://localhost:8000}
