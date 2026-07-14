@@ -40,12 +40,20 @@
 - [x] 所有索引命名符合 CLAUDE.md §3.4 规范
 - [x] 迁移文件可通过 Flyway 自动执行（`spring.flyway.enabled=true`）
 
+## 验证结果（更新 2026-07-14 16:33）
+
+- [x] `FlywayIntegrationTest` 16/16 通过，真实 MySQL 迁移
+- [x] Flyway 日志：`Successfully applied 5 migrations, now at version v5 (00:00.688s)`
+- [x] `SHOW TABLES;` 返回 13 张（12 业务 + flyway_schema_history）
+- [x] `DESC financial_statement;` `DESC report;` `DESC task;` 字段完全匹配 spec §5.2.2
+- [x] `SELECT * FROM flyway_schema_history;` 5 条记录，version 1~5
+- [x] GitHub 已推送：https://github.com/zmccyy/FinReport-Agent.git
+
 ## 已知限制
 
-- 未在真实 MySQL 上执行 Flyway 迁移（Docker 不可用）。需在 M1.07 SpringBoot 骨架完成后，启动应用验证 Flyway 自动 migrate 成功
-- 未添加 FOREIGN KEY 约束（与 spec 一致，可能影响数据完整性校验）
+- 未添加 FOREIGN KEY 约束（与 spec 一致）
+- local profile 下 WebFlux 不触发 `DataSourceAutoConfiguration`，Flyway 需通过程序化 API 或 docker profile 执行
 
 ## 下一步
 
 - [ ] M1.04 MinIO bucket 初始化
-- [ ] M1.07 启动 SpringBoot 应用触发 Flyway migrate，执行 `SHOW TABLES;` 验证
