@@ -21,7 +21,7 @@ import org.junit.jupiter.api.TestMethodOrder;
  * <p>需要 Docker MySQL 容器运行中：docker compose -f deploy/docker-compose.yml up -d mysql</p>
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-class FlywayIntegrationTest {
+class FlywayMigrationIT {
 
     private static final String JDBC_URL = "jdbc:mysql://localhost:3306/finreport?useSSL=false&allowPublicKeyRetrieval=true";
     private static final String USER = "finreport";

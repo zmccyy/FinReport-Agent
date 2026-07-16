@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+      Spring-managed components retain constructor-injected collaborators in private final
+      fields. EI_EXPOSE_REP2 is a false positive here: no collaborator is returned to callers,
+      and Spring owns their lifecycle. EI_EXPOSE_REP (the getter/return-value variant) remains
+      enabled so real representation exposure is still reported.
+    -->
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2"/>
+    </Match>
+
+    <!--
+      JwtUtil must fail application startup when JJWT rejects a malformed signing key. The
+      class has no finalizer and is only constructed by Spring, so CT_CONSTRUCTOR_THROW does
+      not create a partially usable object.
+    -->
+    <Match>
+        <Class name="com.finreport.security.JwtUtil"/>
+        <Bug pattern="CT_CONSTRUCTOR_THROW"/>
+    </Match>
+</FindBugsFilter>

@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<!DOCTYPE module PUBLIC
+    "-//Checkstyle//DTD Checkstyle Configuration 1.3//EN"
+    "https://checkstyle.org/dtds/configuration_1_3.dtd">
+
+<!--
+  Project baseline derived from AGENTS.md: Java sources use four-space indentation.
+  This intentionally avoids Google Checks' two-space indentation and mandatory full
+  Javadoc rules until the pre-existing codebase has been migrated consistently.
+-->
+<module name="Checker">
+    <property name="charset" value="UTF-8"/>
+
+    <module name="FileTabCharacter">
+        <property name="eachLine" value="true"/>
+    </module>
+    <module name="NewlineAtEndOfFile"/>
+
+    <module name="TreeWalker">
+        <module name="AvoidStarImport"/>
+        <module name="EmptyStatement"/>
+        <module name="EqualsHashCode"/>
+        <module name="FallThrough"/>
+        <module name="MultipleVariableDeclarations"/>
+        <module name="RedundantModifier"/>
+        <module name="SimplifyBooleanExpression"/>
+        <module name="SimplifyBooleanReturn"/>
+        <module name="Indentation">
+            <property name="basicOffset" value="4"/>
+            <property name="braceAdjustment" value="0"/>
+            <property name="caseIndent" value="4"/>
+            <property name="lineWrappingIndentation" value="8"/>
+            <property name="throwsIndent" value="8"/>
+            <property name="forceStrictCondition" value="false"/>
+        </module>
+    </module>
+</module>

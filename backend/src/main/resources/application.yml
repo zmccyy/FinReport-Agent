@@ -66,7 +66,7 @@ minio:
 
 # --- JWT ---
 jwt:
-  secret: ${JWT_SECRET:finreport-jwt-secret-key-change-in-production-min-256-bits}
+  secret: ${JWT_SECRET:}
   access-expiration: ${JWT_ACCESS_EXPIRATION:3600}
   refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800}
   issuer: finreport
@@ -113,3 +113,7 @@ spring:
   # Spring Boot auto-config 在依赖不可用时仅 log WARN，不会 crash
   autoconfigure:
     exclude: []
+
+
+jwt:
+  secret: ${JWT_SECRET:finreport-local-development-secret-only-change-before-deployment}

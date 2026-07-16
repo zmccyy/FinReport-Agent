@@ -6,12 +6,13 @@ import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ServerWebExchange;
+
+import com.finreport.trace.TraceContext;
 
 import reactor.core.publisher.Mono;
 
@@ -76,9 +77,8 @@ public class GlobalExceptionHandler {
 
     private Mono<ResponseEntity<Map<String, Object>>> buildErrorResponse(
             ServerWebExchange exchange, HttpStatus status, String errorCode, String detail) {
-        // 尝试从 MDC 获取 traceId，无则生成新 UUID（spec §11.3）
-        String traceId = MDC.get("traceId");
-        if (traceId == null || traceId.isEmpty()) {
+        String traceId = exchange.getAttribute(TraceContext.TRACE_ID);
+        if (traceId == null || traceId.isBlank()) {
             traceId = UUID.randomUUID().toString();
         }
 
