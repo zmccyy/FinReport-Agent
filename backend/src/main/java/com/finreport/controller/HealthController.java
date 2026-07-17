@@ -5,137 +5,111 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.connection.ReactiveRedisConnectionFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.reactive.function.client.WebClient;
 
-import io.r2dbc.spi.ConnectionFactoryMetadata;
+import io.minio.BucketExistsArgs;
+import io.minio.MinioClient;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
-/**
- * 系统健康检查端点 — spec §6.1.3。
- *
- * <p>{@code GET /api/v1/system/health} 返回各组件连接状态，
- * 用于 Docker Compose healthcheck 和负载均衡探活。
- * 所有检测均使用响应式非阻塞方式，不阻塞 Netty event-loop。</p>
- */
+/** Readiness and liveness probes for the backend process. */
 @RestController
 public class HealthController {
 
-    private static final Logger log = LoggerFactory.getLogger(HealthController.class);
-
     private static final Duration PROBE_TIMEOUT = Duration.ofSeconds(2);
+    private static final String UP = "UP";
+    private static final String DOWN = "DOWN";
+    private static final String UPLOAD_BUCKET = "finreport-uploads";
 
-    private final ReactiveRedisConnectionFactory redisConnectionFactory;
-    private final ConnectionFactory rabbitConnectionFactory;
-    private final io.r2dbc.spi.ConnectionFactory r2dbcConnectionFactory;
+    private final DatabaseClient databaseClient;
+    private final org.springframework.data.redis.connection.ReactiveRedisConnectionFactory redis;
+    private final ConnectionFactory rabbit;
+    private final MinioClient minio;
+    private final WebClient webClient;
 
-    @Value("${minio.endpoint}")
-    private String minioEndpoint;
-
-    @Value("${ai-service.base-url}")
-    private String aiServiceUrl;
-
+    /** Creates health probes with bounded I/O timeouts. */
     public HealthController(
-            ReactiveRedisConnectionFactory redisConnectionFactory,
-            ConnectionFactory rabbitConnectionFactory,
-            io.r2dbc.spi.ConnectionFactory r2dbcConnectionFactory) {
-        this.redisConnectionFactory = redisConnectionFactory;
-        this.rabbitConnectionFactory = rabbitConnectionFactory;
-        this.r2dbcConnectionFactory = r2dbcConnectionFactory;
+            DatabaseClient databaseClient,
+            org.springframework.data.redis.connection.ReactiveRedisConnectionFactory redis,
+            ConnectionFactory rabbit,
+            MinioClient minio,
+            WebClient.Builder webClientBuilder,
+            @org.springframework.beans.factory.annotation.Value("${ai-service.base-url}") String aiBaseUrl) {
+        this.databaseClient = databaseClient;
+        this.redis = redis;
+        this.rabbit = rabbit;
+        this.minio = minio;
+        this.webClient = webClientBuilder.baseUrl(aiBaseUrl).build();
     }
 
-    /**
-     * 系统整体健康检查。
-     *
-     * @return 包含各组件状态的 JSON
-     */
+    /** Compatibility readiness endpoint. */
     @GetMapping("/api/v1/system/health")
     public Mono<ResponseEntity<Map<String, Object>>> health() {
-        // MySQL / R2DBC — 同步检查（getMetadata 不阻塞）
-        Map<String, Object> mysqlStatus = checkMysql();
-
-        // Redis — 响应式 PING
-        Mono<Map<String, Object>> redisStatus = checkRedis();
-
-        // RabbitMQ — 同步检查（快速创建/关闭连接）
-        Map<String, Object> rabbitStatus = checkRabbitMq();
-
-        // MinIO + AI-Service — 延迟验证
-        Map<String, Object> minioStatus = Map.of(
-                "status", "UP",
-                "endpoint", minioEndpoint,
-                "note", "connectivity verified at first upload"
-        );
-        Map<String, Object> aiStatus = Map.of(
-                "status", "UP",
-                "url", aiServiceUrl,
-                "note", "connectivity verified at first request"
-        );
-
-        return redisStatus.map(redis -> {
-            Map<String, Object> components = new LinkedHashMap<>();
-            components.put("mysql", mysqlStatus);
-            components.put("redis", redis);
-            components.put("rabbitmq", rabbitStatus);
-            components.put("minio", minioStatus);
-            components.put("aiService", aiStatus);
-
-            // 计算整体状态：任一核心组件 DOWN 则整体 DOWN
-            boolean anyDown = components.values().stream()
-                    .anyMatch(c -> c instanceof Map<?,?> m && "DOWN".equals(m.get("status")));
-            String overall = anyDown ? "DOWN" : "UP";
-
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("status", overall);
-            body.put("service", "finreport-backend");
-            body.put("version", "0.1.0");
-            body.put("timestamp", Instant.now().toString());
-            body.put("components", components);
-
-            return ResponseEntity.ok(body);
-        });
+        return readiness();
     }
 
-    private Map<String, Object> checkMysql() {
-        try {
-            ConnectionFactoryMetadata meta = r2dbcConnectionFactory.getMetadata();
-            return Map.of("status", "UP", "name", meta.getName());
-        } catch (Exception e) {
-            log.warn("[Health] MySQL 连接失败: {}", e.getMessage());
-            return Map.of("status", "DOWN", "error", e.getMessage());
-        }
+    /** True readiness endpoint: all persistent dependencies must be reachable. */
+    @GetMapping("/internal/health")
+    public Mono<ResponseEntity<Map<String, Object>>> readiness() {
+        return Mono.zip(mysql(), redis(), rabbit(), minio(), ai())
+                .map(tuple -> response(Map.of(
+                        "mysql", tuple.getT1(), "redis", tuple.getT2(), "rabbitmq", tuple.getT3(),
+                        "minio", tuple.getT4(), "aiService", tuple.getT5())));
     }
 
-    private Mono<Map<String, Object>> checkRedis() {
-        return redisConnectionFactory.getReactiveConnection()
-                .ping()
-                .timeout(PROBE_TIMEOUT)
-                .map(pong -> Map.of("status", (Object) "UP"))
-                .onErrorResume(e -> {
-                    log.warn("[Health] Redis 连接失败: {}", e.getMessage());
-                    return Mono.just(Map.of("status", (Object) "DOWN", "error", e.getMessage()));
-                })
-                .doFinally(signalType -> {
-                    // ReactiveRedisConnection 由 connectionFactory 管理，无需手动关闭
-                });
+    /** Liveness intentionally reflects only that the backend process is running. */
+    @GetMapping("/internal/live")
+    public Mono<ResponseEntity<Map<String, Object>>> liveness() {
+        return Mono.just(ResponseEntity.ok(Map.of(
+                "status", UP, "service", "finreport-backend", "timestamp", Instant.now().toString())));
     }
 
-    private Map<String, Object> checkRabbitMq() {
-        // 使用 try-with-resources 确保连接被关闭，防止连接泄漏
-        try {
-            try (var conn = rabbitConnectionFactory.createConnection()) {
-                // 连接创建成功即确认 RabbitMQ 可达
+    private Mono<Map<String, Object>> mysql() {
+        return databaseClient.sql("SELECT 1").fetch().rowsUpdated().thenReturn(up())
+                .timeout(PROBE_TIMEOUT).onErrorReturn(down());
+    }
+
+    private Mono<Map<String, Object>> redis() {
+        return redis.getReactiveConnection().ping().thenReturn(up())
+                .timeout(PROBE_TIMEOUT).onErrorReturn(down());
+    }
+
+    private Mono<Map<String, Object>> rabbit() {
+        return Mono.fromCallable(() -> {
+            try (var connection = rabbit.createConnection(); var channel = connection.createChannel(false)) {
+                return up();
             }
-            return Map.of("status", "UP");
-        } catch (Exception e) {
-            log.warn("[Health] RabbitMQ 连接失败: {}", e.getMessage());
-            return Map.of("status", "DOWN", "error", e.getMessage());
-        }
+        }).subscribeOn(Schedulers.boundedElastic()).timeout(PROBE_TIMEOUT).onErrorReturn(down());
     }
+
+    private Mono<Map<String, Object>> minio() {
+        return Mono.fromCallable(() -> minio.bucketExists(BucketExistsArgs.builder().bucket(UPLOAD_BUCKET).build()))
+                .subscribeOn(Schedulers.boundedElastic()).timeout(PROBE_TIMEOUT)
+                .map(exists -> exists ? up() : down()).onErrorReturn(down());
+    }
+
+    private Mono<Map<String, Object>> ai() {
+        return webClient.get().uri("/internal/health").exchangeToMono(response ->
+                        response.statusCode().is2xxSuccessful() ? Mono.just(up()) : Mono.just(down()))
+                .timeout(PROBE_TIMEOUT).onErrorReturn(down());
+    }
+
+    private ResponseEntity<Map<String, Object>> response(Map<String, Map<String, Object>> components) {
+        boolean unavailable = components.values().stream().anyMatch(status -> DOWN.equals(status.get("status")));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status", unavailable ? DOWN : UP);
+        body.put("service", "finreport-backend");
+        body.put("timestamp", Instant.now().toString());
+        body.put("components", components);
+        return ResponseEntity.status(unavailable ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.OK).body(body);
+    }
+
+    private static Map<String, Object> up() { return Map.of("status", UP); }
+    private static Map<String, Object> down() { return Map.of("status", DOWN); }
 }

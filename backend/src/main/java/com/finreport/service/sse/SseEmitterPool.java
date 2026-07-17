@@ -35,9 +35,9 @@ public class SseEmitterPool {
      */
     public Flux<ServerSentEvent<String>> subscribe(String taskId) {
         TaskSink taskSink = sinks.computeIfAbsent(taskId, this::createTaskSink);
-        return taskSink.sink().asFlux()
+        return taskSink.replaySink().asFlux()
                 .doOnCancel(() -> log.debug("[SseEmitterPool] 客户端取消订阅 taskId={} subCount={}",
-                        taskId, taskSink.sink().currentSubscriberCount()))
+                        taskId, taskSink.replaySink().currentSubscriberCount()))
                 .doOnTerminate(() -> log.debug("[SseEmitterPool] Flux 终止 taskId={}", taskId));
     }
 
@@ -53,8 +53,12 @@ public class SseEmitterPool {
         // Creating the replay sink here preserves those events for the later subscriber.
         TaskSink taskSink = sinks.computeIfAbsent(taskId, this::createTaskSink);
         synchronized (taskSink.monitor()) {
-            Sinks.EmitResult result = taskSink.sink().tryEmitNext(event);
-            if (result.isFailure()) {
+            Sinks.EmitResult replayResult = taskSink.replaySink().tryEmitNext(event);
+            Sinks.EmitResult result = taskSink.realtimeSink().tryEmitNext(event);
+            if (replayResult.isFailure() && replayResult != Sinks.EmitResult.FAIL_ZERO_SUBSCRIBER) {
+                log.warn("[SseEmitterPool] replay emit failed taskId={} result={}", taskId, replayResult);
+            }
+            if (result.isFailure() && result != Sinks.EmitResult.FAIL_ZERO_SUBSCRIBER) {
                 log.warn("[SseEmitterPool] tryEmitNext 失败 taskId={} result={}", taskId, result);
                 return false;
             }
@@ -75,7 +79,11 @@ public class SseEmitterPool {
             return;
         }
         synchronized (taskSink.monitor()) {
-            Sinks.EmitResult result = taskSink.sink().tryEmitComplete();
+            Sinks.EmitResult replayResult = taskSink.replaySink().tryEmitComplete();
+            Sinks.EmitResult result = taskSink.realtimeSink().tryEmitComplete();
+            if (replayResult.isFailure() && replayResult != Sinks.EmitResult.FAIL_TERMINATED) {
+                log.warn("[SseEmitterPool] replay complete failed taskId={} result={}", taskId, replayResult);
+            }
             if (result.isFailure() && result != Sinks.EmitResult.FAIL_TERMINATED) {
                 log.warn("[SseEmitterPool] tryEmitComplete 失败 taskId={} result={}", taskId, result);
             }
@@ -85,9 +93,26 @@ public class SseEmitterPool {
 
     private TaskSink createTaskSink(String taskId) {
         log.debug("[SseEmitterPool] 创建 sink taskId={}", taskId);
-        return new TaskSink(Sinks.many().replay().limit(REPLAY_HISTORY), new Object());
+        return new TaskSink(
+                Sinks.many().replay().limit(REPLAY_HISTORY),
+                Sinks.many().multicast().directBestEffort(),
+                new Object());
     }
 
-    private record TaskSink(Sinks.Many<ServerSentEvent<String>> sink, Object monitor) {
+    /**
+     * Subscribe to real-time events only. Redis owns reconnect replay semantics.
+     *
+     * @param taskId task identifier
+     * @return live event stream without in-memory history
+     */
+    public Flux<ServerSentEvent<String>> subscribeRealtime(String taskId) {
+        TaskSink taskSink = sinks.computeIfAbsent(taskId, this::createTaskSink);
+        return taskSink.realtimeSink().asFlux();
+    }
+
+    private record TaskSink(
+            Sinks.Many<ServerSentEvent<String>> replaySink,
+            Sinks.Many<ServerSentEvent<String>> realtimeSink,
+            Object monitor) {
     }
 }

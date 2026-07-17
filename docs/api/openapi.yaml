@@ -1,0 +1,222 @@
+openapi: 3.0.3
+info:
+  title: FinReport Agent M1 API
+  version: 0.1.0
+  description: |
+    M1.01–M1.12 的认证、上传、任务和 SSE 接口。错误响应遵循 RFC 9457。
+servers:
+  - url: http://localhost:8080
+paths:
+  /api/v1/reports/upload:
+    post:
+      summary: 上传 PDF 财报并创建或复用处理任务
+      description: |
+        成功始终保持 HTTP 201。相同用户与同一 PDF MD5 在任务为排队、运行或成功时会返回已有 task/report；
+        FAILED 或 CANCELLED 的历史任务仅可用新的 Idempotency-Key 创建重试任务。Idempotency-Key 按用户隔离。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, companyCode, companyName, reportType, reportPeriod]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: PDF，最大 50 MB。
+                companyCode:
+                  type: string
+                  example: '600519'
+                companyName:
+                  type: string
+                  example: 贵州茅台
+                reportType:
+                  type: string
+                  example: ANNUAL
+                reportPeriod:
+                  type: string
+                  example: '2024-12-31'
+      responses:
+        '201':
+          description: 新建任务或符合去重规则的既有任务。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '409':
+          description: Idempotency-Key 冲突。
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+              examples:
+                keyReused:
+                  value:
+                    type: https://finreport.example/errors/IDEMPOTENCY_KEY_REUSED
+                    title: Conflict
+                    status: 409
+                    detail: 同一个 Idempotency-Key 不能用于不同的文件
+                inProgress:
+                  value:
+                    type: https://finreport.example/errors/IDEMPOTENCY_REQUEST_IN_PROGRESS
+                    title: Conflict
+                    status: 409
+                    detail: 同一 Idempotency-Key 的上传请求仍在处理中
+  /api/v1/tasks/{id}:
+    get:
+      summary: 查询当前用户的任务
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 任务详情。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+  /api/v1/tasks/{id}/cancel:
+    post:
+      summary: 取消当前用户的任务
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 取消后的任务。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+  /api/v1/tasks/{id}/stream:
+    get:
+      summary: 订阅当前用户的任务进度
+      description: |
+        事件 ID 统一为 `{taskId}:{sequence}`。带 Last-Event-ID 时从 Redis 持久化历史补发；
+        游标无效、事件过期或无历史时至少返回最新快照，再接入实时 fan-out。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/TaskId'
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema:
+            type: string
+          example: task-abc:42
+      responses:
+        '200':
+          description: text/event-stream，事件类型为 progress、done、error，另有 heartbeat comment。
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/TaskNotFound'
+  /internal/live:
+    get:
+      summary: 后端 liveness
+      responses:
+        '200':
+          description: 后端进程可运行。
+  /internal/health:
+    get:
+      summary: 后端 readiness
+      responses:
+        '200':
+          description: MySQL、Redis、RabbitMQ、MinIO 和 AI 服务均就绪。
+        '503':
+          description: 至少一个依赖不可用。
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TaskId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+        maxLength: 128
+  responses:
+    TaskNotFound:
+      description: 不存在或不属于当前用户；两种情况统一为 TASK_NOT_FOUND，避免泄露资源存在性。
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://finreport.example/errors/TASK_NOT_FOUND
+            title: Not Found
+            status: 404
+            detail: 任务不存在
+  schemas:
+    UploadResponse:
+      type: object
+      required: [taskId, reportId, status]
+      properties:
+        taskId:
+          type: string
+        reportId:
+          type: integer
+          format: int64
+        status:
+          type: string
+          example: QUEUED
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+        taskType:
+          type: string
+        refReportId:
+          type: integer
+          format: int64
+        status:
+          type: string
+          enum: [QUEUED, RUNNING, SUCCESS, FAILED, CANCELLED]
+        currentStep:
+          type: string
+        progress:
+          type: integer
+        errorMsg:
+          type: string
+          nullable: true
+    Problem:
+      type: object
+      required: [type, title, status, detail]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
+        traceId:
+          type: string

@@ -278,6 +278,70 @@ class TaskOrchestratorTest {
         }
 
         @Test
+        @DisplayName("should persist each retry and fail only after the third retry is exhausted")
+        void shouldPersistEachRetryAndFailOnlyAfterThirdRetryIsExhausted() {
+            Task task = new Task();
+            task.setId("task-retry");
+            task.setStatus(TaskStatus.PARSE_RUNNING.name());
+            task.setPayload("{\"pdfObjectKey\":\"reports/retry.pdf\"}");
+            TaskStep step = new TaskStep();
+            step.setTaskId(task.getId());
+            step.setStepName("PARSE");
+            step.setStatus(StepStatus.RUNNING.name());
+            step.setRetryCount(0);
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(step));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+
+            for (int expectedRetry = 1; expectedRetry <= 3; expectedRetry++) {
+                final int retry = expectedRetry;
+                StepVerifier.create(orchestrator.handleStepProgress(
+                                task.getId(), "PARSE", "FAILED", Map.of("error", "AI timeout"))
+                                .contextWrite(context -> context.put(TraceContext.TRACE_ID, "retry-trace")))
+                        .assertNext(saved -> assertEquals(TaskStatus.PARSE_RETRY.name(), saved.getStatus()))
+                        .verifyComplete();
+                assertEquals(retry, step.getRetryCount());
+                assertEquals(StepStatus.RETRY.name(), step.getStatus());
+                verify(messageProducer).publishRetry(
+                        eq(task.getId()), eq("parse"), any(Map.class), eq(retry), eq("retry-trace"));
+            }
+
+            StepVerifier.create(orchestrator.handleStepProgress(
+                            task.getId(), "PARSE", "FAILED", Map.of("error", "AI timeout")))
+                    .assertNext(saved -> assertEquals(TaskStatus.FAILED.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            assertEquals(StepStatus.FAILED.name(), step.getStatus());
+            verify(messageProducer, times(3)).publishRetry(
+                    eq(task.getId()), eq("parse"), any(Map.class), any(Integer.class), anyString());
+        }
+
+        @Test
+        @DisplayName("should ignore duplicate successful progress without dispatching the next step")
+        void shouldIgnoreDuplicateSuccessfulProgressWithoutDispatchingNextStep() {
+            Task task = new Task();
+            task.setId("task-duplicate-success");
+            task.setStatus(TaskStatus.PARSE_SUCCESS.name());
+            TaskStep step = new TaskStep();
+            step.setTaskId(task.getId());
+            step.setStepName("PARSE");
+            step.setStatus(StepStatus.SUCCESS.name());
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(step));
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of()))
+                    .expectNext(task)
+                    .verifyComplete();
+
+            verify(stepRepo, never()).save(any(TaskStep.class));
+            verify(taskRepo, never()).save(any(Task.class));
+            verify(messageProducer, never()).publishTaskStep(anyString(), anyString(), any(Map.class), anyString());
+        }
+
+        @Test
         @DisplayName("should throw for nonexistent task")
         void shouldThrowForNonexistentTask() {
             when(taskRepo.findById("task-ghost")).thenReturn(Mono.empty());
@@ -338,6 +402,118 @@ class TaskOrchestratorTest {
             StepVerifier.create(orchestrator.cancelTask("task-fail"))
                     .assertNext(t -> assertEquals(TaskStatus.FAILED.name(), t.getStatus()))
                     .verifyComplete();
+        }
+    }
+
+    @Nested
+    @DisplayName("reliability and ownership branches")
+    class ReliabilityAndOwnershipBranches {
+
+        @Test
+        @DisplayName("should update a task report reference and hide missing tasks")
+        void shouldUpdateReportReferenceAndRejectMissingTask() {
+            Task task = Task.builder().id("task-report-ref").status(TaskStatus.PENDING.name()).build();
+            when(taskRepo.findById("task-report-ref")).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+
+            StepVerifier.create(orchestrator.updateRefReportId("task-report-ref", 88L))
+                    .assertNext(saved -> assertEquals(88L, saved.getRefReportId()))
+                    .verifyComplete();
+
+            when(taskRepo.findById("task-report-missing")).thenReturn(Mono.empty());
+            StepVerifier.create(orchestrator.updateRefReportId("task-report-missing", 88L))
+                    .expectErrorMatches(error -> error instanceof com.finreport.exception.BusinessException businessException
+                            && "TASK_NOT_FOUND".equals(businessException.getErrorCode()))
+                    .verify();
+        }
+
+        @Test
+        @DisplayName("should mark only non-terminal tasks as failed")
+        void shouldMarkOnlyNonTerminalTasksAsFailed() {
+            Task active = Task.builder().id("task-active-fail").status(TaskStatus.PARSE_RUNNING.name()).build();
+            Task completed = Task.builder().id("task-completed").status(TaskStatus.COMPLETED.name()).build();
+            when(taskRepo.findById("task-active-fail")).thenReturn(Mono.just(active));
+            when(taskRepo.findById("task-completed")).thenReturn(Mono.just(completed));
+            when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+
+            StepVerifier.create(orchestrator.markTaskFailed("task-active-fail", "upload failed"))
+                    .assertNext(saved -> {
+                        assertEquals(TaskStatus.FAILED.name(), saved.getStatus());
+                        assertEquals("upload failed", saved.getErrorMsg());
+                        assertNotNull(saved.getFinishedAt());
+                    })
+                    .verifyComplete();
+            StepVerifier.create(orchestrator.markTaskFailed("task-completed", "ignored"))
+                    .expectNext(completed)
+                    .verifyComplete();
+
+            verify(taskRepo, times(1)).save(any(Task.class));
+        }
+
+        @Test
+        @DisplayName("should keep scoped query and scoped cancel within the owner boundary")
+        void shouldUseScopedRepositoryQueriesForOwnerBoundary() {
+            Task owned = Task.builder().id("task-owned").userId(7L).status(TaskStatus.PENDING.name()).build();
+            when(taskRepo.findByIdAndUserId("task-owned", 7L)).thenReturn(Mono.just(owned));
+            when(taskRepo.findByIdAndUserId("task-hidden", 8L)).thenReturn(Mono.empty());
+
+            StepVerifier.create(orchestrator.findByIdAndUserId("task-owned", 7L))
+                    .expectNext(owned)
+                    .verifyComplete();
+            StepVerifier.create(orchestrator.cancelTask("task-hidden", 8L))
+                    .expectErrorMatches(error -> error instanceof com.finreport.exception.BusinessException businessException
+                            && "TASK_NOT_FOUND".equals(businessException.getErrorCode()))
+                    .verify();
+        }
+
+        @Test
+        @DisplayName("should leave an unknown progress status unchanged")
+        void shouldLeaveUnknownProgressStatusUnchanged() {
+            Task task = Task.builder().id("task-unknown-progress").status(TaskStatus.PARSE_RUNNING.name()).build();
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "RUNNING", Map.of()))
+                    .expectNext(task)
+                    .verifyComplete();
+        }
+
+        @Test
+        @DisplayName("should complete the task after the REPORT step succeeds")
+        void shouldCompleteTaskAfterReportSuccess() {
+            Task task = Task.builder().id("task-report-success").status(TaskStatus.REPORT_RUNNING.name())
+                    .progress(75).payload("{\"pdfObjectKey\":\"uploads/7/report.pdf\"}").build();
+            TaskStep step = TaskStep.builder().taskId(task.getId()).stepName("REPORT")
+                    .status(StepStatus.RUNNING.name()).build();
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "REPORT")).thenReturn(Mono.just(step));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "REPORT", "SUCCESS", Map.of()))
+                    .assertNext(saved -> {
+                        assertEquals(TaskStatus.COMPLETED.name(), saved.getStatus());
+                        assertEquals(100, saved.getProgress());
+                        assertNotNull(saved.getFinishedAt());
+                    })
+                    .verifyComplete();
+        }
+
+        @Test
+        @DisplayName("should retain EXTRACT_PARTIAL until every extraction step succeeds")
+        void shouldRetainPartialExtractionUntilAllStepsSucceed() {
+            Task task = Task.builder().id("task-extract-partial").status(TaskStatus.EXTRACT_RUNNING.name()).build();
+            TaskStep bs = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
+                    .status(StepStatus.RUNNING.name()).build();
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(bs));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS")).thenReturn(Mono.empty());
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "EXTRACT_BS", "SUCCESS", Map.of()))
+                    .assertNext(saved -> assertEquals(TaskStatus.EXTRACT_PARTIAL.name(), saved.getStatus()))
+                    .verifyComplete();
+            verify(messageProducer, never()).publishTaskStep(anyString(), anyString(), any(Map.class), anyString());
         }
     }
 

@@ -217,21 +217,20 @@
 
 ### 7.1 启动开发环境
 
-    # 一键启动所有依赖（MySQL/Redis/Milvus/RabbitMQ/MinIO）
+    # 唯一的完整开发栈启动方式：base Compose + dev overlay。
+    # docker-compose.dev.yml 只是 overlay，不能单独运行。
     cd deploy
-    docker compose -f docker-compose.dev.yml up -d
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
-    # 启动后端
-    cd backend
-    ./mvnw spring-boot:run
+    # 查看状态。8 个常驻应用服务应为 healthy；minio-init 是一次性服务，应为 Exited (0)。
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
 
-    # 启动 AI 服务
-    cd ai-service
-    uvicorn app.main:app --reload --port 8000
+    # 停止并删除开发栈容器（保留命名卷）。
+    docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 
-    # 启动前端
-    cd frontend
-    npm run dev
+    # 开发服务地址：前端 http://localhost:5173，后端 http://localhost:8080，
+    # AI 服务 http://localhost:8000，RabbitMQ http://localhost:15672，MinIO http://localhost:9001。
+    # 后端 /internal/live 是进程 liveness；/internal/health 是依赖 readiness。
 
 ### 7.2 初始化数据
 

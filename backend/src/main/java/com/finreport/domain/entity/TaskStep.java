@@ -46,4 +46,7 @@ public class TaskStep {
 
     @Column("error_msg")
     private String errorMsg;
+
+    @Column("retry_count")
+    private Integer retryCount;
 }

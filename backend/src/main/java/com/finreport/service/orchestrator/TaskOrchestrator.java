@@ -192,22 +192,23 @@ public class TaskOrchestrator {
                 .switchIfEmpty(Mono.error(new BusinessException(
                         org.springframework.http.HttpStatus.NOT_FOUND,
                         "TASK_NOT_FOUND", "任务不存在: " + taskId)))
-                .flatMap(task -> {
-                    TaskStatus current = TaskStatus.valueOf(task.getStatus());
-                    if (current.isTerminal()) {
-                        return Mono.just(task);
-                    }
-                    if (!stateMachine.canTransition(current, TaskStatus.CANCELLED)) {
-                        return Mono.error(new BusinessException(
-                                org.springframework.http.HttpStatus.CONFLICT,
-                                "INVALID_TRANSITION",
-                                "当前状态不允许取消: " + current));
-                    }
-                    task.setStatus(TaskStatus.CANCELLED.name());
-                    task.setFinishedAt(LocalDateTime.now());
-                    return taskRepo.save(task)
-                            .doOnSuccess(t -> log.info("[TaskOrchestrator] 任务已取消 taskId={}", taskId));
-                });
+                .flatMap(this::cancelExistingTask);
+    }
+
+    private Mono<Task> cancelExistingTask(Task task) {
+        TaskStatus current = TaskStatus.valueOf(task.getStatus());
+        if (current.isTerminal()) {
+            return Mono.just(task);
+        }
+        if (!stateMachine.canTransition(current, TaskStatus.CANCELLED)) {
+            return Mono.error(new BusinessException(
+                    org.springframework.http.HttpStatus.CONFLICT,
+                    "INVALID_TRANSITION", "当前状态不允许取消: " + current));
+        }
+        task.setStatus(TaskStatus.CANCELLED.name());
+        task.setFinishedAt(LocalDateTime.now());
+        return taskRepo.save(task)
+                .doOnSuccess(saved -> log.info("[TaskOrchestrator] 任务已取消 taskId={}", task.getId()));
     }
 
     /**
@@ -219,6 +220,34 @@ public class TaskOrchestrator {
     public Mono<Task> findById(String taskId) {
         log.debug("[TaskOrchestrator] findById taskId={}", taskId);
         return taskRepo.findById(taskId);
+    }
+
+    /**
+     * 在用户边界内查询任务。
+     *
+     * @param taskId 任务 ID
+     * @param userId 当前认证用户 ID
+     * @return 所属任务；非所有者返回 empty
+     */
+    public Mono<Task> findByIdAndUserId(String taskId, Long userId) {
+        log.debug("[TaskOrchestrator] findByIdAndUserId taskId={} userId={}", taskId, userId);
+        return taskRepo.findByIdAndUserId(taskId, userId);
+    }
+
+    /**
+     * 在用户边界内取消任务。
+     *
+     * @param taskId 任务 ID
+     * @param userId 当前认证用户 ID
+     * @return 已取消的任务
+     */
+    public Mono<Task> cancelTask(String taskId, Long userId) {
+        log.debug("[TaskOrchestrator] cancelTask taskId={} userId={}", taskId, userId);
+        return taskRepo.findByIdAndUserId(taskId, userId)
+                .switchIfEmpty(Mono.error(new BusinessException(
+                        org.springframework.http.HttpStatus.NOT_FOUND,
+                        "TASK_NOT_FOUND", "任务不存在: " + taskId)))
+                .flatMap(this::cancelExistingTask);
     }
 
     /**
@@ -431,24 +460,32 @@ public class TaskOrchestrator {
         String taskId = task.getId();
         log.debug("[TaskOrchestrator] 步骤成功 taskId={} step={}", taskId, stepName);
 
-        // 更新步骤记录
+        // A duplicate SUCCESS must be acknowledged without changing state or triggering the next step.
+        // idempotency_key is taskId + step, so progress redelivery cannot schedule downstream work twice.
         return stepRepo.findByTaskIdAndStepName(taskId, stepName)
+                .switchIfEmpty(Mono.error(new BusinessException(
+                        org.springframework.http.HttpStatus.NOT_FOUND,
+                        "TASK_STEP_NOT_FOUND", "任务步骤不存在: " + stepName)))
                 .flatMap(step -> {
+                    if (StepStatus.SUCCESS.name().equals(step.getStatus())) {
+                        log.debug("[TaskOrchestrator] 重复成功进度，跳过后续编排 taskId={} step={}",
+                                taskId, stepName);
+                        return Mono.just(task);
+                    }
                     step.setStatus(StepStatus.SUCCESS.name());
                     step.setFinishedAt(LocalDateTime.now());
                     if (step.getStartedAt() != null) {
                         step.setDurationMs((int) java.time.Duration.between(
                                 step.getStartedAt(), LocalDateTime.now()).toMillis());
                     }
-                    return stepRepo.save(step);
-                })
-                .then(updateTaskProgress(task, stepName))
-                .flatMap(updatedTask -> {
-                    if (stepName.startsWith("EXTRACT_")) {
-                        return handleExtractStepSuccess(updatedTask, taskId);
-                    } else {
-                        return handleNonExtractStepSuccess(updatedTask, stepName, taskId);
-                    }
+                    return stepRepo.save(step)
+                            .then(updateTaskProgress(task, stepName))
+                            .flatMap(updatedTask -> {
+                                if (stepName.startsWith("EXTRACT_")) {
+                                    return handleExtractStepSuccess(updatedTask, taskId);
+                                }
+                                return handleNonExtractStepSuccess(updatedTask, stepName, taskId);
+                            });
                 });
     }
 
@@ -511,81 +548,54 @@ public class TaskOrchestrator {
     private Mono<Task> handleStepFailure(Task task, String stepName, Map<String, Object> result) {
         String taskId = task.getId();
         log.debug("[TaskOrchestrator] 步骤失败 taskId={} step={}", taskId, stepName);
-
-        // 更新步骤记录
         return stepRepo.findByTaskIdAndStepName(taskId, stepName)
-                .flatMap(step -> {
-                    step.setStatus(StepStatus.FAILED.name());
-                    step.setFinishedAt(LocalDateTime.now());
-                    if (result != null && result.containsKey("error")) {
-                        step.setErrorMsg(result.get("error").toString());
-                    }
-                    return stepRepo.save(step);
-                })
-                .then(Mono.defer(() -> {
-                    // 统计该阶段的重试次数
-                    return countRetriesForStep(taskId, stepName)
-                            .flatMap(retryCount -> {
-                                TaskStatus currentStatus = stateMachine.onStepFailure(stepName);
-                                TaskStatus nextStatus = stateMachine.decideRetryOrFail(
-                                        currentStatus, retryCount);
-
-                                if (nextStatus == TaskStatus.FAILED) {
-                                    task.setStatus(TaskStatus.FAILED.name());
-                                    task.setFinishedAt(LocalDateTime.now());
-                                    task.setErrorMsg("步骤 " + stepName + " 重试耗尽");
-                                    return taskRepo.save(task);
-                                }
-
-                                // 进入重试
-                                task.setStatus(nextStatus.name());
-                                return taskRepo.save(task)
-                                        .flatMap(saved -> {
-                                            // 更新步骤为 RETRY 并重新调度
-                                            return stepRepo.findByTaskIdAndStepName(taskId, stepName)
-                                                    .flatMap(step -> {
-                                                        step.setStatus(StepStatus.RETRY.name());
-                                                        return stepRepo.save(step);
-                                                    })
-                                                    .then(dispatchRetry(taskId, stepName, saved));
-                                        });
-                            });
-                }));
+                .switchIfEmpty(Mono.error(new BusinessException(
+                        org.springframework.http.HttpStatus.NOT_FOUND,
+                        "TASK_STEP_NOT_FOUND", "任务步骤不存在: " + stepName)))
+                .flatMap(step -> scheduleRetryOrFail(task, step, result));
     }
 
-    /**
-     * 统计某个阶段已重试次数。
-     *
-     * <p>M1.09 骨架实现：由于每个 step 只有一条记录，通过检查当前状态判断：
-     * 如果状态为 FAILED 或 RETRY 说明至少失败过一次，但无法精确计数。
-     * 后续里程碑会通过 task_step.retry_count 列跟踪精确次数。</p>
-     */
-    private Mono<Integer> countRetriesForStep(String taskId, String stepName) {
-        return stepRepo.findByTaskIdAndStepName(taskId, stepName)
-                .map(step -> {
-                    String s = step.getStatus();
-                    // 已在 handleStepFailure 中被设为 FAILED
-                    if (StepStatus.FAILED.name().equals(s)) {
-                        return 1;
-                    }
-                    // 之前已被标记为 RETRY，说明至少重试了 1 次
-                    if (StepStatus.RETRY.name().equals(s)) {
-                        return 2;
-                    }
-                    return 0;
-                })
-                .defaultIfEmpty(0);
+    private Mono<Task> scheduleRetryOrFail(Task task, TaskStep step, Map<String, Object> result) {
+        int retries = step.getRetryCount() == null ? 0 : step.getRetryCount();
+        String taskId = task.getId();
+        String stepName = step.getStepName();
+        if (retries >= TaskStateMachine.MAX_RETRIES) {
+            step.setStatus(StepStatus.FAILED.name());
+            step.setFinishedAt(LocalDateTime.now());
+            step.setErrorMsg(errorMessage(result));
+            task.setStatus(TaskStatus.FAILED.name());
+            task.setFinishedAt(LocalDateTime.now());
+            task.setErrorMsg("步骤 " + stepName + " 重试耗尽");
+            return stepRepo.save(step).then(taskRepo.save(task));
+        }
+
+        int nextRetry = retries + 1;
+        TaskStatus retryStatus = stateMachine.decideRetryOrFail(
+                stateMachine.onStepFailure(stepName), retries);
+        step.setStatus(StepStatus.RETRY.name());
+        step.setRetryCount(nextRetry);
+        step.setErrorMsg(errorMessage(result));
+        task.setStatus(retryStatus.name());
+        return stepRepo.save(step)
+                .then(taskRepo.save(task))
+                .flatMap(saved -> Mono.deferContextual(context -> Mono.fromCallable(() -> {
+                    String traceId = context.getOrDefault(TraceContext.TRACE_ID, org.slf4j.MDC.get("traceId"));
+                    messageProducer.publishRetry(
+                            taskId,
+                            TaskStepName.valueOf(stepName).getRoutingKey(),
+                            buildPayload(saved),
+                            nextRetry,
+                            traceId);
+                    return saved;
+                })))
+                .onErrorMap(com.finreport.exception.IntegrationException.class, error -> error);
     }
 
-
-    /**
-     * 重试调度 — 指数退避 delay = 2^retries 秒（M1.09 简化为 1s）。
-     * TODO M2.x: 传递 retryCount 参数实现真正的指数退避。
-     */
-    private Mono<Task> dispatchRetry(String taskId, String stepName, Task task) {
-        TaskStepName step = TaskStepName.valueOf(stepName);
-        return Mono.delay(java.time.Duration.ofSeconds(1))
-                .then(dispatchStep(taskId, step, buildPayload(task)));
+    private static String errorMessage(Map<String, Object> result) {
+        if (result == null || result.get("error") == null) {
+            return "步骤处理失败";
+        }
+        return String.valueOf(result.get("error"));
     }
 
     private Mono<Task> updateTaskProgress(Task task, String stepName) {

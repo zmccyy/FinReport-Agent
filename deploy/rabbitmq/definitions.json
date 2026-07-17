@@ -1,5 +1,13 @@
 {
   "rabbit_version": "3.13",
+  "users": [
+    {
+      "name": "guest",
+      "password_hash": "bP6O1GHWMrPaXG/j6NCXwlkSi6ShGe0B4XNwZHkbnX69E6NC",
+      "hashing_algorithm": "rabbit_password_hashing_sha256",
+      "tags": "administrator"
+    }
+  ],
   "vhosts": [
     {
       "name": "/"
@@ -135,6 +143,36 @@
         "x-message-ttl": 604800000,
         "x-max-length": 10000
       }
+    },
+    {
+      "name": "q.task.retry.1s",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 1000,
+        "x-dead-letter-exchange": "task.exchange"
+      }
+    },
+    {
+      "name": "q.task.retry.5s",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 5000,
+        "x-dead-letter-exchange": "task.exchange"
+      }
+    },
+    {
+      "name": "q.task.retry.30s",
+      "vhost": "/",
+      "durable": true,
+      "auto_delete": false,
+      "arguments": {
+        "x-message-ttl": 30000,
+        "x-dead-letter-exchange": "task.exchange"
+      }
     }
   ],
   "exchanges": [
@@ -169,6 +207,33 @@
       "name": "kb.exchange",
       "vhost": "/",
       "type": "topic",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "task.retry.1s.exchange",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "task.retry.5s.exchange",
+      "vhost": "/",
+      "type": "direct",
+      "durable": true,
+      "auto_delete": false,
+      "internal": false,
+      "arguments": {}
+    },
+    {
+      "name": "task.retry.30s.exchange",
+      "vhost": "/",
+      "type": "direct",
       "durable": true,
       "auto_delete": false,
       "internal": false,
@@ -254,6 +319,150 @@
       "destination": "q.kb.build",
       "destination_type": "queue",
       "routing_key": "kb.build.industry",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.1s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.1s",
+      "destination_type": "queue",
+      "routing_key": "parse",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.1s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.1s",
+      "destination_type": "queue",
+      "routing_key": "extract.bs",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.1s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.1s",
+      "destination_type": "queue",
+      "routing_key": "extract.is",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.1s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.1s",
+      "destination_type": "queue",
+      "routing_key": "extract.cf",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.1s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.1s",
+      "destination_type": "queue",
+      "routing_key": "check",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.1s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.1s",
+      "destination_type": "queue",
+      "routing_key": "report",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.5s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.5s",
+      "destination_type": "queue",
+      "routing_key": "parse",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.5s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.5s",
+      "destination_type": "queue",
+      "routing_key": "extract.bs",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.5s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.5s",
+      "destination_type": "queue",
+      "routing_key": "extract.is",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.5s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.5s",
+      "destination_type": "queue",
+      "routing_key": "extract.cf",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.5s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.5s",
+      "destination_type": "queue",
+      "routing_key": "check",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.5s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.5s",
+      "destination_type": "queue",
+      "routing_key": "report",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.30s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.30s",
+      "destination_type": "queue",
+      "routing_key": "parse",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.30s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.30s",
+      "destination_type": "queue",
+      "routing_key": "extract.bs",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.30s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.30s",
+      "destination_type": "queue",
+      "routing_key": "extract.is",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.30s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.30s",
+      "destination_type": "queue",
+      "routing_key": "extract.cf",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.30s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.30s",
+      "destination_type": "queue",
+      "routing_key": "check",
+      "arguments": {}
+    },
+    {
+      "source": "task.retry.30s.exchange",
+      "vhost": "/",
+      "destination": "q.task.retry.30s",
+      "destination_type": "queue",
+      "routing_key": "report",
       "arguments": {}
     }
   ]

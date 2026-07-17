@@ -24,11 +24,9 @@ public class TaskStateMachine {
     /**
      * 最大重试次数。
      *
-     * <p>M1.09 骨架：每个步骤只有一条 task_step 记录，无法精确追踪重试次数。
-     * 设为 1（失败即终止），防止无限重试循环。
-     * TODO M2.x: 通过 task_step.retry_count 列实现精确重试计数，恢复为 3。</p>
+     * 每个步骤最多重新投递三次；第 3 次重试仍失败后任务进入 FAILED。
      */
-    public static final int MAX_RETRIES = 1;
+    public static final int MAX_RETRIES = 3;
 
     /** 从每个状态允许的下一状态集合 */
     private static final Map<TaskStatus, Set<TaskStatus>> ALLOWED = new EnumMap<>(TaskStatus.class);
@@ -43,7 +41,8 @@ public class TaskStateMachine {
         ALLOWED.put(TaskStatus.PARSE_SUCCESS, Set.of(TaskStatus.EXTRACT_RUNNING));
         ALLOWED.put(TaskStatus.PARSE_FAILED,
                 Set.of(TaskStatus.PARSE_RETRY, TaskStatus.FAILED));
-        ALLOWED.put(TaskStatus.PARSE_RETRY, Set.of(TaskStatus.PARSE_RUNNING));
+        ALLOWED.put(TaskStatus.PARSE_RETRY,
+                Set.of(TaskStatus.PARSE_RUNNING, TaskStatus.PARSE_SUCCESS, TaskStatus.PARSE_FAILED));
 
         // 抽取阶段
         ALLOWED.put(TaskStatus.EXTRACT_RUNNING,
@@ -54,7 +53,9 @@ public class TaskStateMachine {
         ALLOWED.put(TaskStatus.EXTRACT_SUCCESS, Set.of(TaskStatus.CHECK_RUNNING));
         ALLOWED.put(TaskStatus.EXTRACT_FAILED,
                 Set.of(TaskStatus.EXTRACT_RETRY, TaskStatus.FAILED));
-        ALLOWED.put(TaskStatus.EXTRACT_RETRY, Set.of(TaskStatus.EXTRACT_RUNNING));
+        ALLOWED.put(TaskStatus.EXTRACT_RETRY,
+                Set.of(TaskStatus.EXTRACT_RUNNING, TaskStatus.EXTRACT_SUCCESS,
+                        TaskStatus.EXTRACT_PARTIAL, TaskStatus.EXTRACT_FAILED));
 
         // 勾稽阶段
         ALLOWED.put(TaskStatus.CHECK_RUNNING,
@@ -62,7 +63,8 @@ public class TaskStateMachine {
         ALLOWED.put(TaskStatus.CHECK_SUCCESS, Set.of(TaskStatus.REPORT_RUNNING));
         ALLOWED.put(TaskStatus.CHECK_FAILED,
                 Set.of(TaskStatus.CHECK_RETRY, TaskStatus.FAILED));
-        ALLOWED.put(TaskStatus.CHECK_RETRY, Set.of(TaskStatus.CHECK_RUNNING));
+        ALLOWED.put(TaskStatus.CHECK_RETRY,
+                Set.of(TaskStatus.CHECK_RUNNING, TaskStatus.CHECK_SUCCESS, TaskStatus.CHECK_FAILED));
 
         // 报告阶段
         ALLOWED.put(TaskStatus.REPORT_RUNNING,
@@ -70,7 +72,8 @@ public class TaskStateMachine {
         ALLOWED.put(TaskStatus.REPORT_SUCCESS, Set.of(TaskStatus.COMPLETED));
         ALLOWED.put(TaskStatus.REPORT_FAILED,
                 Set.of(TaskStatus.REPORT_RETRY, TaskStatus.FAILED));
-        ALLOWED.put(TaskStatus.REPORT_RETRY, Set.of(TaskStatus.REPORT_RUNNING));
+        ALLOWED.put(TaskStatus.REPORT_RETRY,
+                Set.of(TaskStatus.REPORT_RUNNING, TaskStatus.REPORT_SUCCESS, TaskStatus.REPORT_FAILED));
 
         // 终态
         ALLOWED.put(TaskStatus.COMPLETED, Set.of());

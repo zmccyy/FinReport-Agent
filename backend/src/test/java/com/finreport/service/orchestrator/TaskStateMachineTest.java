@@ -2,6 +2,7 @@ package com.finreport.service.orchestrator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -80,7 +81,7 @@ class TaskStateMachineTest {
         @DisplayName("PARSE_FAILED 在重试次数 >= MAX_RETRIES 时进入 FAILED")
         void shouldEnterFailedWhenRetriesExhausted() {
             assertEquals(TaskStatus.FAILED,
-                    sm.decideRetryOrFail(TaskStatus.PARSE_FAILED, 1));
+                    sm.decideRetryOrFail(TaskStatus.PARSE_FAILED, TaskStateMachine.MAX_RETRIES));
             assertEquals(TaskStatus.FAILED,
                     sm.decideRetryOrFail(TaskStatus.PARSE_FAILED, 5));
         }
@@ -190,7 +191,7 @@ class TaskStateMachineTest {
         @DisplayName("REPORT_FAILED 重试耗尽 → FAILED")
         void shouldFailWhenReportRetriesExhausted() {
             assertEquals(TaskStatus.FAILED,
-                    sm.decideRetryOrFail(TaskStatus.REPORT_FAILED, 1));
+                    sm.decideRetryOrFail(TaskStatus.REPORT_FAILED, TaskStateMachine.MAX_RETRIES));
         }
     }
 
@@ -277,6 +278,60 @@ class TaskStateMachineTest {
             assertEquals(TaskStatus.REPORT_SUCCESS, sm.onStepSuccess("REPORT"));
             assertEquals(TaskStatus.EXTRACT_SUCCESS, sm.onStepSuccess("EXTRACT_BS"));
             assertEquals(TaskStatus.EXTRACT_SUCCESS, sm.onStepSuccess("EXTRACT_IS"));
+        }
+    }
+
+    @Nested
+    @DisplayName("step status helpers")
+    class StepStatusHelpers {
+
+        @Test
+        @DisplayName("should map every supported successful step")
+        void shouldMapEverySupportedSuccessfulStep() {
+            assertEquals(TaskStatus.PARSE_SUCCESS, sm.onStepSuccess("PARSE"));
+            assertEquals(TaskStatus.EXTRACT_SUCCESS, sm.onStepSuccess("EXTRACT_BS"));
+            assertEquals(TaskStatus.CHECK_SUCCESS, sm.onStepSuccess("CHECK"));
+            assertEquals(TaskStatus.REPORT_SUCCESS, sm.onStepSuccess("REPORT"));
+            assertEquals(TaskStatus.FAILED, sm.onStepSuccess("UNKNOWN"));
+        }
+
+        @Test
+        @DisplayName("should map every supported failed step")
+        void shouldMapEverySupportedFailedStep() {
+            assertEquals(TaskStatus.PARSE_FAILED, sm.onStepFailure("PARSE"));
+            assertEquals(TaskStatus.EXTRACT_FAILED, sm.onStepFailure("EXTRACT_CF"));
+            assertEquals(TaskStatus.CHECK_FAILED, sm.onStepFailure("CHECK"));
+            assertEquals(TaskStatus.REPORT_FAILED, sm.onStepFailure("REPORT"));
+            assertEquals(TaskStatus.FAILED, sm.onStepFailure("UNKNOWN"));
+        }
+
+        @Test
+        @DisplayName("should map running state and next stage for every route")
+        void shouldMapRunningStateAndNextStageForEveryRoute() {
+            assertEquals(TaskStatus.PARSE_RUNNING, sm.runningStateFor("PARSE"));
+            assertEquals(TaskStatus.EXTRACT_RUNNING, sm.runningStateFor("EXTRACT_IS"));
+            assertEquals(TaskStatus.CHECK_RUNNING, sm.runningStateFor("CHECK"));
+            assertEquals(TaskStatus.REPORT_RUNNING, sm.runningStateFor("REPORT"));
+            assertEquals(TaskStatus.PARSE_RUNNING, sm.runningStateFor("UNKNOWN"));
+
+            assertEquals("EXTRACT_BS", sm.nextStepAfter("PARSE"));
+            assertEquals("CHECK", sm.nextStepAfter("EXTRACT_BS"));
+            assertEquals("CHECK", sm.nextStepAfter("EXTRACT_IS"));
+            assertEquals("CHECK", sm.nextStepAfter("EXTRACT_CF"));
+            assertEquals("CHECK", sm.nextStepAfter("EXTRACT_COMPLETE"));
+            assertEquals("REPORT", sm.nextStepAfter("CHECK"));
+            assertNull(sm.nextStepAfter("REPORT"));
+            assertNull(sm.nextStepAfter("UNKNOWN"));
+        }
+
+        @Test
+        @DisplayName("should choose every retry route and reject a non-failed state")
+        void shouldChooseEveryRetryRouteAndRejectNonFailedState() {
+            assertEquals(TaskStatus.PARSE_RETRY, sm.decideRetryOrFail(TaskStatus.PARSE_FAILED, 2));
+            assertEquals(TaskStatus.EXTRACT_RETRY, sm.decideRetryOrFail(TaskStatus.EXTRACT_FAILED, 2));
+            assertEquals(TaskStatus.CHECK_RETRY, sm.decideRetryOrFail(TaskStatus.CHECK_FAILED, 2));
+            assertEquals(TaskStatus.REPORT_RETRY, sm.decideRetryOrFail(TaskStatus.REPORT_FAILED, 2));
+            assertEquals(TaskStatus.FAILED, sm.decideRetryOrFail(TaskStatus.PARSE_RUNNING, 2));
         }
     }
 }

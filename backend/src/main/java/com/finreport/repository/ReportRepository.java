@@ -14,11 +14,19 @@ import reactor.core.publisher.Mono;
 public interface ReportRepository extends ReactiveCrudRepository<Report, Long> {
 
     /**
-     * 根据 pdf_md5 查找报告（用于去重检测）。
+     * 在所属用户范围内根据 pdf_md5 查找报告（用于隔离去重检测）。
      *
+     * @param userId 用户 ID
      * @param pdfMd5 PDF 文件 MD5
      * @return 报告实体（可能为空）
      */
+    Mono<Report> findByUserIdAndPdfMd5(Long userId, String pdfMd5);
+
+    /**
+     * Legacy unscoped lookup retained only for backwards-compatible repository callers.
+     * Production upload paths must use {@link #findByUserIdAndPdfMd5(Long, String)}.
+     */
+    @Deprecated
     Mono<Report> findByPdfMd5(String pdfMd5);
 
     /**

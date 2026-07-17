@@ -28,4 +28,9 @@ public interface TaskRepository extends ReactiveCrudRepository<Task, String> {
      * 查询用户特定状态的任务。
      */
     Flux<Task> findByUserIdAndStatus(Long userId, String status);
+
+    /**
+     * 在所属用户范围内查询任务，避免按 taskId 越权访问。
+     */
+    Mono<Task> findByIdAndUserId(String id, Long userId);
 }

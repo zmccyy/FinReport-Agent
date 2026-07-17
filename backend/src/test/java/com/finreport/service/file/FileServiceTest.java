@@ -39,6 +39,7 @@ import com.finreport.repository.ReportRepository;
 import com.finreport.service.orchestrator.TaskOrchestrator;
 
 import io.minio.BucketExistsArgs;
+import io.minio.MakeBucketArgs;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import reactor.core.publisher.Flux;
@@ -80,6 +81,7 @@ class FileServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOps);
         // Default stubs — specific tests override as needed
         when(valueOps.get(anyString())).thenReturn(Mono.empty());
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(java.time.Duration.class))).thenReturn(Mono.just(true));
     }
 
     // ========================================================================
@@ -125,6 +127,23 @@ class FileServiceTest {
             }
         };
         return filePart;
+    }
+
+    private Task stubSuccessfulNewUpload(Long userId, String taskId, Long reportId) throws Exception {
+        Task task = Task.builder().id(taskId).userId(userId).taskType("REPORT_PARSE")
+                .status(TaskStatus.PENDING.name()).createdAt(LocalDateTime.now()).build();
+        when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(true);
+        when(reportRepo.findByUserIdAndPdfMd5(eq(userId), anyString())).thenReturn(Mono.empty());
+        when(orchestrator.createTaskWithoutDispatch(eq(userId), eq(null), any(Map.class)))
+                .thenReturn(Mono.just(task));
+        when(orchestrator.updateRefReportId(eq(taskId), eq(reportId))).thenReturn(Mono.just(task));
+        when(orchestrator.dispatchTask(eq(taskId), any(Map.class))).thenReturn(Mono.just(task));
+        when(reportRepo.save(any(Report.class))).thenAnswer(invocation -> {
+            Report report = invocation.getArgument(0);
+            report.setId(reportId);
+            return Mono.just(report);
+        });
+        return task;
     }
 
     // ========================================================================
@@ -201,42 +220,30 @@ class FileServiceTest {
         void shouldReuseReportOnMd5Match() throws Exception {
             FilePart filePart = mockFilePart("report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
 
-            // Existing report with matching MD5
             Report existingReport = Report.builder()
                     .id(55L).taskId("task-old").userId(1L)
                     .companyCode("600519").companyName("贵州茅台")
                     .reportType("ANNUAL").reportPeriod("2024-12-31")
                     .pdfMd5(FileService.computeMd5(SAMPLE_PDF))
-                    .pdfObjectKey("uploads/1/202607/task-old/report.pdf")
+                    .pdfObjectKey("uploads/1/hash/report.pdf")
                     .parseStatus("PENDING").build();
-            when(reportRepo.findByPdfMd5(anyString())).thenReturn(Mono.just(existingReport));
-
-            // New task for existing report
-            Task newTask = Task.builder()
-                    .id("task-new01")
-                    .userId(1L)
-                    .refReportId(55L)
-                    .status(TaskStatus.PARSE_RUNNING.name())
-                    .build();
-            when(orchestrator.createTask(eq(1L), eq(55L), any(Map.class)))
-                    .thenReturn(Mono.just(newTask));
-
-            // Redis
-            when(valueOps.set(anyString(), anyString(), any(java.time.Duration.class)))
-                    .thenReturn(Mono.just(true));
+            Task activeTask = Task.builder().id("task-old").userId(1L)
+                    .status(TaskStatus.PARSE_RUNNING.name()).build();
+            when(reportRepo.findByUserIdAndPdfMd5(eq(1L), anyString())).thenReturn(Mono.just(existingReport));
+            when(orchestrator.findByIdAndUserId("task-old", 1L)).thenReturn(Mono.just(activeTask));
 
             StepVerifier.create(fileService.upload(filePart, "600519", "贵州茅台", "ANNUAL",
                             "2024-12-31", 1L, "idem-key-002"))
                     .assertNext(response -> {
-                        assertEquals("task-new01", response.taskId());
+                        assertEquals("task-old", response.taskId());
                         assertEquals(55L, response.reportId());
+                        assertEquals(TaskStatus.PARSE_RUNNING.name(), response.status());
                     })
                     .verifyComplete();
 
-            // Should NOT upload to MinIO
             verify(minioClient, never()).putObject(any(PutObjectArgs.class));
-            // Should NOT create new report
             verify(reportRepo, never()).save(any(Report.class));
+            verify(orchestrator, never()).createTaskWithoutDispatch(any(), any(), any(Map.class));
         }
     }
 
@@ -253,8 +260,10 @@ class FileServiceTest {
         void shouldReturnCachedResult() {
             FilePart filePart = mockFilePart("report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
 
-            String cached = "{\"taskId\":\"task-cached\",\"reportId\":42,\"status\":\"PENDING\"}";
-            when(valueOps.get("fin:idem:upload:idem-key-003")).thenReturn(Mono.just(cached));
+            String cached = "{\"state\":\"COMPLETED\",\"md5\":\""
+                    + FileService.computeMd5(SAMPLE_PDF)
+                    + "\",\"response\":{\"taskId\":\"task-cached\",\"reportId\":42,\"status\":\"PENDING\"}}";
+            when(valueOps.get("fin:idem:upload:1:idem-key-003")).thenReturn(Mono.just(cached));
 
             StepVerifier.create(fileService.upload(filePart, "600519", "茅台", "ANNUAL",
                             "2024-12-31", 1L, "idem-key-003"))
@@ -266,7 +275,7 @@ class FileServiceTest {
                     .verifyComplete();
 
             // Should NOT process the file
-            verify(reportRepo, never()).findByPdfMd5(anyString());
+            verify(reportRepo, never()).findByUserIdAndPdfMd5(any(), anyString());
             verify(orchestrator, never()).createTaskWithoutDispatch(any(), any(), any(Map.class));
         }
 
@@ -352,6 +361,126 @@ class FileServiceTest {
         }
     }
 
+    @Test
+    @DisplayName("should reject an idempotency key reused for a different PDF")
+    void shouldRejectIdempotencyKeyReusedForDifferentPdf() {
+        FilePart filePart = mockFilePart("report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
+        String cached = "{\"state\":\"COMPLETED\",\"md5\":\"other-md5\","
+                + "\"response\":{\"taskId\":\"task-cached\",\"reportId\":42,\"status\":\"PENDING\"}}";
+        when(valueOps.get("fin:idem:upload:1:idem-reused")).thenReturn(Mono.just(cached));
+
+        StepVerifier.create(fileService.upload(filePart, "600519", "茅台", "ANNUAL",
+                        "2024-12-31", 1L, "idem-reused"))
+                .expectErrorMatches(error -> error instanceof BusinessException businessException
+                        && "IDEMPOTENCY_KEY_REUSED".equals(businessException.getErrorCode()))
+                .verify();
+
+        verify(orchestrator, never()).createTaskWithoutDispatch(any(), any(), any(Map.class));
+    }
+
+    @Test
+    @DisplayName("should return in-progress conflict when a concurrent idempotency claim does not finish")
+    void shouldReturnInProgressConflictWhenConcurrentClaimDoesNotFinish() {
+        FilePart filePart = mockFilePart("report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
+        String key = "fin:idem:upload:1:idem-processing";
+        String processing = "{\"state\":\"PROCESSING\",\"md5\":\""
+                + FileService.computeMd5(SAMPLE_PDF) + "\",\"response\":null}";
+        when(valueOps.get(key)).thenReturn(Mono.empty(), Mono.just(processing));
+        when(valueOps.setIfAbsent(eq(key), anyString(), any(java.time.Duration.class))).thenReturn(Mono.just(false));
+
+        StepVerifier.create(fileService.upload(filePart, "600519", "茅台", "ANNUAL",
+                        "2024-12-31", 1L, "idem-processing"))
+                .expectErrorMatches(error -> error instanceof BusinessException businessException
+                        && "IDEMPOTENCY_REQUEST_IN_PROGRESS".equals(businessException.getErrorCode()))
+                .verify();
+
+        verify(orchestrator, never()).createTaskWithoutDispatch(any(), any(), any(Map.class));
+    }
+
+    @Test
+    @DisplayName("should retry a failed same-user report only with a new idempotency key")
+    void shouldCreateNewTaskForFailedSameUserReportWithNewIdempotencyKey() throws Exception {
+        FilePart filePart = mockFilePart("report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
+        Report report = Report.builder().id(55L).taskId("task-failed").userId(1L)
+                .pdfMd5(FileService.computeMd5(SAMPLE_PDF))
+                .pdfObjectKey("uploads/1/hash/report.pdf").build();
+        Task failedTask = Task.builder().id("task-failed").userId(1L)
+                .status(TaskStatus.FAILED.name()).build();
+        Task retryTask = Task.builder().id("task-retry").userId(1L)
+                .status(TaskStatus.PENDING.name()).build();
+        when(reportRepo.findByUserIdAndPdfMd5(eq(1L), anyString())).thenReturn(Mono.just(report));
+        when(orchestrator.findByIdAndUserId("task-failed", 1L)).thenReturn(Mono.just(failedTask));
+        when(orchestrator.createTaskWithoutDispatch(eq(1L), eq(55L), any(Map.class))).thenReturn(Mono.just(retryTask));
+        when(reportRepo.save(report)).thenReturn(Mono.just(report));
+        when(orchestrator.dispatchTask(eq("task-retry"), any(Map.class))).thenReturn(Mono.just(retryTask));
+        when(valueOps.set(anyString(), anyString(), any(java.time.Duration.class))).thenReturn(Mono.just(true));
+
+        StepVerifier.create(fileService.upload(filePart, "600519", "茅台", "ANNUAL",
+                        "2024-12-31", 1L, "idem-retry"))
+                .assertNext(response -> {
+                    assertEquals("task-retry", response.taskId());
+                    assertEquals(55L, response.reportId());
+                })
+                .verifyComplete();
+
+        assertEquals("task-retry", report.getTaskId());
+        verify(minioClient, never()).putObject(any(PutObjectArgs.class));
+        verify(orchestrator).dispatchTask(eq("task-retry"), any(Map.class));
+    }
+
+    @Test
+    @DisplayName("should fall back to database-scoped deduplication when Redis claiming fails")
+    void shouldFallBackToDatabaseScopedDeduplicationWhenRedisClaimFails() throws Exception {
+        FilePart filePart = mockFilePart("report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
+        Report report = Report.builder().id(56L).taskId("task-active-redis-fallback").userId(1L)
+                .pdfMd5(FileService.computeMd5(SAMPLE_PDF)).build();
+        Task activeTask = Task.builder().id("task-active-redis-fallback").userId(1L)
+                .status(TaskStatus.PARSE_RUNNING.name()).build();
+        when(valueOps.setIfAbsent(anyString(), anyString(), any(java.time.Duration.class)))
+                .thenReturn(Mono.error(new IllegalStateException("Redis unavailable")));
+        when(reportRepo.findByUserIdAndPdfMd5(eq(1L), anyString())).thenReturn(Mono.just(report));
+        when(orchestrator.findByIdAndUserId("task-active-redis-fallback", 1L)).thenReturn(Mono.just(activeTask));
+
+        StepVerifier.create(fileService.upload(filePart, "600519", "茅台", "ANNUAL",
+                        "2024-12-31", 1L, "idem-redis-down"))
+                .assertNext(response -> assertEquals("task-active-redis-fallback", response.taskId()))
+                .verifyComplete();
+
+        verify(minioClient, never()).putObject(any(PutObjectArgs.class));
+    }
+
+    @Test
+    @DisplayName("should isolate a new same-MD5 upload under the requesting user object path")
+    void shouldIsolateNewSameMd5UploadUnderRequestingUserObjectPath() throws Exception {
+        FilePart filePart = mockFilePart("quarter/report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
+        stubSuccessfulNewUpload(2L, "task-user-two", 77L);
+
+        StepVerifier.create(fileService.upload(filePart, "600519", "茅台", "ANNUAL",
+                        "2024-12-31", 2L, null))
+                .assertNext(response -> assertEquals("task-user-two", response.taskId()))
+                .verifyComplete();
+
+        ArgumentCaptor<PutObjectArgs> objectCaptor = ArgumentCaptor.forClass(PutObjectArgs.class);
+        verify(minioClient).putObject(objectCaptor.capture());
+        assertTrue(objectCaptor.getValue().object().startsWith("uploads/2/"));
+        assertTrue(objectCaptor.getValue().object().endsWith("quarter_report.pdf"));
+    }
+
+    @Test
+    @DisplayName("should create the upload bucket when MinIO reports it absent")
+    void shouldCreateUploadBucketWhenMinioReportsItAbsent() throws Exception {
+        FilePart filePart = mockFilePart("report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
+        Task task = stubSuccessfulNewUpload(3L, "task-create-bucket", 78L);
+        when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(false);
+
+        StepVerifier.create(fileService.upload(filePart, "600519", "茅台", "ANNUAL",
+                        "2024-12-31", 3L, null))
+                .assertNext(response -> assertEquals(task.getId(), response.taskId()))
+                .verifyComplete();
+
+        verify(minioClient).makeBucket(any(MakeBucketArgs.class));
+    }
+
     // ========================================================================
     // Nested: Static helpers
     // ========================================================================
@@ -397,4 +526,76 @@ class FileServiceTest {
             assertEquals(6, yyyyMM.length());
         }
     }
+
+
+    @Test
+    @DisplayName("should reuse an active task for the same user and MD5 without redispatch")
+    void shouldReuseActiveTaskWithoutRedispatch() {
+        FilePart filePart = mockFilePart("report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
+        Report report = Report.builder()
+                .id(55L).taskId("task-active").userId(1L)
+                .pdfMd5(FileService.computeMd5(SAMPLE_PDF))
+                .pdfObjectKey("uploads/1/hash/report.pdf")
+                .build();
+        Task activeTask = Task.builder().id("task-active").userId(1L)
+                .status(TaskStatus.PARSE_RUNNING.name()).build();
+        when(reportRepo.findByUserIdAndPdfMd5(eq(1L), anyString())).thenReturn(Mono.just(report));
+        when(orchestrator.findByIdAndUserId("task-active", 1L)).thenReturn(Mono.just(activeTask));
+
+        StepVerifier.create(fileService.upload(filePart, "600519", "茅台", "ANNUAL",
+                        "2024-12-31", 1L, null))
+                .assertNext(response -> {
+                    assertEquals("task-active", response.taskId());
+                    assertEquals(55L, response.reportId());
+                    assertEquals(TaskStatus.PARSE_RUNNING.name(), response.status());
+                })
+                .verifyComplete();
+
+        verify(orchestrator, never()).createTask(any(), any(), any(Map.class));
+        verify(orchestrator, never()).createTaskWithoutDispatch(any(), any(), any(Map.class));
+        verify(orchestrator, never()).dispatchTask(anyString(), any(Map.class));
+    }
+
+    @Test
+    @DisplayName("should require a new idempotency key before retrying a failed report task")
+    void shouldRequireIdempotencyKeyForFailedReportRetry() {
+        FilePart filePart = mockFilePart("report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
+        Report report = Report.builder()
+                .id(55L).taskId("task-failed").userId(1L)
+                .pdfMd5(FileService.computeMd5(SAMPLE_PDF))
+                .pdfObjectKey("uploads/1/hash/report.pdf")
+                .build();
+        Task failedTask = Task.builder().id("task-failed").userId(1L)
+                .status(TaskStatus.FAILED.name()).build();
+        when(reportRepo.findByUserIdAndPdfMd5(eq(1L), anyString())).thenReturn(Mono.just(report));
+        when(orchestrator.findByIdAndUserId("task-failed", 1L)).thenReturn(Mono.just(failedTask));
+
+        StepVerifier.create(fileService.upload(filePart, "600519", "茅台", "ANNUAL",
+                        "2024-12-31", 1L, null))
+                .expectErrorMatches(error -> error instanceof BusinessException businessException
+                        && businessException.getStatus() == org.springframework.http.HttpStatus.CONFLICT
+                        && "IDEMPOTENCY_KEY_REQUIRED_FOR_RETRY".equals(businessException.getErrorCode()))
+                .verify();
+
+        verify(orchestrator, never()).createTask(any(), any(), any(Map.class));
+    }
+
+    @Test
+    @DisplayName("should scope completed idempotency records to the current user")
+    void shouldScopeIdempotencyToCurrentUser() {
+        FilePart filePart = mockFilePart("report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
+        String cached = "{\"state\":\"COMPLETED\",\"md5\":\""
+                + FileService.computeMd5(SAMPLE_PDF)
+                + "\",\"response\":{\"taskId\":\"task-cached\",\"reportId\":42,\"status\":\"PENDING\"}}";
+        when(valueOps.get("fin:idem:upload:7:idem-key-user-scoped")).thenReturn(Mono.just(cached));
+
+        StepVerifier.create(fileService.upload(filePart, "600519", "茅台", "ANNUAL",
+                        "2024-12-31", 7L, "idem-key-user-scoped"))
+                .assertNext(response -> assertEquals("task-cached", response.taskId()))
+                .verifyComplete();
+
+        verify(valueOps).get("fin:idem:upload:7:idem-key-user-scoped");
+        verify(orchestrator, never()).createTaskWithoutDispatch(any(), any(), any(Map.class));
+    }
+
 }

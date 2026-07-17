@@ -91,15 +91,32 @@ services:
       - "${MINIO_CONSOLE_PORT:-9001}:9001"   # Web Console
     volumes:
       - minio_data:/data
-      - ./minio/init.sh:/data/init.sh:ro
     networks:
       - finreport-net
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/ready"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 15s
+
+  # Creates required buckets exactly once after MinIO is ready. This service is not long-lived.
+  minio-init:
+    image: minio/mc:latest
+    container_name: finreport-minio-init
+    restart: "no"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ENDPOINT: http://minio:9000
+    volumes:
+      - ./minio/init.sh:/init.sh:ro
+    entrypoint: ["/bin/sh", "/init.sh"]
+    networks:
+      - finreport-net
+    depends_on:
+      minio:
+        condition: service_healthy
 
   # Milvus 元数据存储
   etcd:
@@ -113,9 +130,12 @@ services:
       ETCD_SNAPSHOT_COUNT: "50000"
     command: >
       etcd
-      -advertise-client-urls=http://etcd:2379
-      -listen-client-urls=http://0.0.0.0:2379
-      -listen-peer-urls=http://0.0.0.0:2380
+      --name=default
+      --advertise-client-urls=http://etcd:2379
+      --listen-client-urls=http://0.0.0.0:2379
+      --initial-advertise-peer-urls=http://etcd:2380
+      --listen-peer-urls=http://0.0.0.0:2380
+      --initial-cluster=default=http://etcd:2380
       --data-dir=/etcd
     volumes:
       - etcd_data:/etcd
@@ -150,8 +170,8 @@ services:
     depends_on:
       etcd:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9091/healthz"]
       interval: 15s
@@ -204,8 +224,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-      minio:
-        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/internal/health"]
       interval: 15s
@@ -251,8 +271,12 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      ai-service:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8080/api/v1/system/health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/internal/health"]
       interval: 15s
       timeout: 5s
       retries: 3

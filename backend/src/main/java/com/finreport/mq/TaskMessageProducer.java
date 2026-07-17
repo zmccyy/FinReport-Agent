@@ -27,6 +27,10 @@ public class TaskMessageProducer {
     private static final Logger log = LoggerFactory.getLogger(TaskMessageProducer.class);
 
     static final String TASK_EXCHANGE = "task.exchange";
+    private static final String RETRY_EXCHANGE_PREFIX = "task.retry.";
+    private static final int FIRST_RETRY = 1;
+    private static final int SECOND_RETRY = 2;
+    private static final int THIRD_RETRY = 3;
 
     private final RabbitTemplate rabbitTemplate;
     private final ObjectMapper objectMapper;
@@ -57,41 +61,68 @@ public class TaskMessageProducer {
      */
     public void publishTaskStep(
             String taskId, String step, Map<String, Object> payload, String traceId) {
-        String routingKey = step;
-        if (traceId == null || traceId.isBlank()) {
-            traceId = UUID.randomUUID().toString();
-        }
+        publish(taskId, step, payload, traceId, 0, TASK_EXCHANGE);
+    }
 
+    /**
+     * 发布延迟重试消息。消息仍保留同一 idempotencyKey；重试次数只写入消息 header。
+     *
+     * @param taskId 任务 ID
+     * @param step 原始步骤 routing key
+     * @param payload 步骤参数
+     * @param retryCount 已安排的重试次数（1、2、3）
+     * @param traceId 链路 trace ID
+     */
+    public void publishRetry(
+            String taskId, String step, Map<String, Object> payload, int retryCount, String traceId) {
+        String exchange = RETRY_EXCHANGE_PREFIX + retryDelayName(retryCount) + ".exchange";
+        publish(taskId, step, payload, traceId, retryCount, exchange);
+    }
+
+    private void publish(
+            String taskId,
+            String step,
+            Map<String, Object> payload,
+            String traceId,
+            int retryCount,
+            String exchange) {
+        String effectiveTraceId = traceId;
+        if (effectiveTraceId == null || effectiveTraceId.isBlank()) {
+            effectiveTraceId = UUID.randomUUID().toString();
+        }
         try {
             Map<String, Object> messageBody = Map.of(
                     "taskId", taskId,
                     "step", step,
                     "payload", payload,
                     "timestamp", Instant.now().toString(),
-                    "idempotencyKey", taskId + ":" + step
-            );
-
-            byte[] body = objectMapper.writeValueAsBytes(messageBody);
-
+                    "idempotencyKey", taskId + ":" + step);
             MessageProperties props = new MessageProperties();
             props.setContentType(MessageProperties.CONTENT_TYPE_JSON);
             props.setDeliveryMode(MessageDeliveryMode.PERSISTENT);
-            props.setHeader("traceId", traceId);
+            props.setHeader("traceId", effectiveTraceId);
             props.setHeader("taskId", taskId);
             props.setHeader("step", step);
             props.setHeader("idempotencyKey", taskId + ":" + step);
-
-            Message message = new Message(body, props);
-
-            rabbitTemplate.convertAndSend(TASK_EXCHANGE, routingKey, message);
-            log.info("[TaskMessageProducer] 消息已发布 exchange={} routingKey={} taskId={} step={} traceId={}",
-                    TASK_EXCHANGE, routingKey, taskId, step, traceId);
-        } catch (Exception e) {
-            log.error("[TaskMessageProducer] 消息发布失败 taskId={} step={}", taskId, step, e);
+            props.setHeader("x-retry-count", retryCount);
+            rabbitTemplate.convertAndSend(exchange, step,
+                    new Message(objectMapper.writeValueAsBytes(messageBody), props));
+            log.info("[TaskMessageProducer] 消息已发布 exchange={} routingKey={} taskId={} step={} retry={}",
+                    exchange, step, taskId, step, retryCount);
+        } catch (Exception error) {
+            log.error("[TaskMessageProducer] 消息发布失败 taskId={} step={}", taskId, step, error);
             throw new com.finreport.exception.IntegrationException(
                     org.springframework.http.HttpStatus.INTERNAL_SERVER_ERROR,
-                    "MQ_PUBLISH_FAILED",
-                    "MQ 消息发布失败: " + step, e);
+                    "MQ_PUBLISH_FAILED", "MQ 消息发布失败: " + step, error);
         }
+    }
+
+    private static String retryDelayName(int retryCount) {
+        return switch (retryCount) {
+            case FIRST_RETRY -> "1s";
+            case SECOND_RETRY -> "5s";
+            case THIRD_RETRY -> "30s";
+            default -> throw new IllegalArgumentException("retryCount must be between 1 and 3");
+        };
     }
 }

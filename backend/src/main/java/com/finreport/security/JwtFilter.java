@@ -33,6 +33,8 @@ public class JwtFilter implements WebFilter {
     private static final List<String> PUBLIC_PATH_PREFIXES = List.of(
             "/api/v1/auth/",
             "/api/v1/system/health",
+            "/internal/live",
+            "/internal/health",
             "/actuator"
     );
 

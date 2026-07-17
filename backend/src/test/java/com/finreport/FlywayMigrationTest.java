@@ -29,15 +29,17 @@ class FlywayMigrationTest {
             "^\\s{2}(\\w+)\\s+", Pattern.MULTILINE);
 
     @Test
-    @DisplayName("所有 5 个迁移文件存在")
-    void shouldHaveFiveMigrationFiles() {
+    @DisplayName("所有 6 个迁移文件存在")
+    void shouldHaveSixMigrationFiles() {
         List<String> files = listMigrationFiles();
-        assertEquals(5, files.size(), "应有 5 个迁移文件");
+        assertEquals(6, files.size(), "应有 6 个迁移文件");
         assertTrue(files.contains("V1__init_user.sql"), "缺少 V1__init_user.sql");
         assertTrue(files.contains("V2__init_report.sql"), "缺少 V2__init_report.sql");
         assertTrue(files.contains("V3__init_task.sql"), "缺少 V3__init_task.sql");
         assertTrue(files.contains("V4__init_model_audit.sql"), "缺少 V4__init_model_audit.sql");
         assertTrue(files.contains("V5__init_indexes.sql"), "缺少 V5__init_indexes.sql");
+        assertTrue(files.contains("V6__m1_reliability_hardening.sql"),
+                "缺少 V6__m1_reliability_hardening.sql");
     }
 
     @Test
@@ -246,6 +248,22 @@ class FlywayMigrationTest {
     }
 
     @Test
+    @DisplayName("V6 可靠性加固迁移包含去重、重试和任务索引")
+    void v6_reliabilityHardening() {
+        String content = readMigrationFile("V6__m1_reliability_hardening.sql");
+        assertTrue(content.contains("DROP INDEX uk_md5"), "V6 必须移除跨用户 uk_md5 约束");
+        assertTrue(content.contains("DROP INDEX task_id"), "V6 必须解除 report.task_id 单值约束");
+        assertTrue(content.contains("uk_report_user_md5 (user_id, pdf_md5)"),
+                "V6 必须创建用户隔离的 MD5 唯一索引");
+        assertTrue(content.contains("idx_report_task (task_id)"),
+                "V6 必须保留 report.task_id 查询索引");
+        assertTrue(content.contains("ADD COLUMN retry_count"),
+                "V6 必须记录 task_step 重试次数");
+        assertTrue(content.contains("idx_task_step_idempotency (task_id, step_name, status)"),
+                "V6 必须创建任务步骤幂等查询索引");
+    }
+
+    @Test
     @DisplayName("所有表使用 InnoDB + utf8mb4")
     void shouldUseInnoDBAndUtf8mb4() {
         for (String file : listMigrationFiles()) {
@@ -310,7 +328,8 @@ class FlywayMigrationTest {
         // Classpath resource listing doesn't work reliably for directories.
         // Instead, check each known file exists.
         String[] known = {"V1__init_user.sql", "V2__init_report.sql",
-                "V3__init_task.sql", "V4__init_model_audit.sql", "V5__init_indexes.sql"};
+                "V3__init_task.sql", "V4__init_model_audit.sql", "V5__init_indexes.sql",
+                "V6__m1_reliability_hardening.sql"};
         for (String name : known) {
             String path = MIGRATION_DIR + name;
             if (getClass().getClassLoader().getResource(path) != null) {

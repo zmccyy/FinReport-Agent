@@ -6,6 +6,7 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +24,7 @@ import com.finreport.domain.entity.Task;
 import com.finreport.domain.enums.TaskStatus;
 import com.finreport.exception.BusinessException;
 import com.finreport.service.orchestrator.TaskOrchestrator;
+import com.finreport.service.sse.RedisSseEventStore;
 import com.finreport.service.sse.SseEmitterPool;
 
 import reactor.core.publisher.Flux;
@@ -47,11 +49,21 @@ public class TaskController {
 
     private final TaskOrchestrator orchestrator;
     private final SseEmitterPool ssePool;
+    private final RedisSseEventStore eventStore;
     private final ObjectMapper objectMapper;
 
+    /** Backward-compatible constructor for isolated controller tests. */
     public TaskController(TaskOrchestrator orchestrator, SseEmitterPool ssePool) {
+        this(orchestrator, ssePool, null);
+    }
+
+    /** Creates a task controller with Redis as the SSE recovery source of truth. */
+    @Autowired
+    public TaskController(
+            TaskOrchestrator orchestrator, SseEmitterPool ssePool, RedisSseEventStore eventStore) {
         this.orchestrator = orchestrator;
         this.ssePool = ssePool;
+        this.eventStore = eventStore;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -60,54 +72,43 @@ public class TaskController {
      *
      * <p>{@code GET /api/v1/tasks/{id}/stream}
      * 返回 {@code text/event-stream}，持续推送 progress / done / error 事件。
-     * 客户端断线后通过 {@code Last-Event-ID} 头重连，server 从 Sinks.Many
-     * 重放缓存（replay().limit(16)）恢复。</p>
+     * 客户端断线后通过 {@code Last-Event-ID} 头重连。Redis 是恢复历史的唯一来源，
+     * 当前进程的 {@code SseEmitterPool} 仅用于实时 fan-out。</p>
      *
      * <p>若任务已处于终态，直接返回一条 done/error 事件后关闭连接。</p>
      *
      * @param taskId      任务 ID
-     * @param lastEventId 客户端断线重连时传递的最后事件 ID（用于日志记录；
-     *                    实际重放由 replay sink 自动完成）
+     * @param lastEventId 客户端断线重连时传递的最后事件 ID（格式：taskId:sequence）
      * @return SSE 事件流
      */
     @GetMapping(value = "/tasks/{id}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<String>> streamProgress(
             @PathVariable("id") String taskId,
+            @RequestHeader("X-User-Id") Long userId,
             @RequestHeader(value = "Last-Event-ID", required = false) String lastEventId) {
-
-        log.debug("[TaskController] SSE 订阅 taskId={} lastEventId={}", taskId, lastEventId);
-
-        // 先检查任务是否存在
-        return orchestrator.findById(taskId)
+        log.debug("[TaskController] SSE 订阅 taskId={} userId={} lastEventId={}",
+                taskId, userId, lastEventId);
+        return orchestrator.findByIdAndUserId(taskId, userId)
                 .switchIfEmpty(Mono.error(new BusinessException(
-                        HttpStatus.NOT_FOUND,
-                        "TASK_NOT_FOUND", "任务不存在: " + taskId)))
-                .flatMapMany(task -> {
-                    TaskStatus taskStatus = parseStatus(task);
-                    if (taskStatus.isTerminal()) {
-                        log.debug("[TaskController] 任务已终态 taskId={} status={}",
-                                taskId, taskStatus);
-                        return Flux.from(buildTerminalEvent(taskId, taskStatus, task));
-                    }
+                        HttpStatus.NOT_FOUND, "TASK_NOT_FOUND", "任务不存在: " + taskId)))
+                .flatMapMany(task -> buildStream(taskId, lastEventId, task));
+    }
 
-                    // 任务进行中 → 订阅 SSE 流
-                    Flux<ServerSentEvent<String>> eventStream = ssePool.subscribe(taskId);
-
-                    // 心跳：eventStream 完成时通过 takeUntilOther 自动停止
-                    Flux<ServerSentEvent<String>> heartbeat = Flux.interval(HEARTBEAT_INTERVAL)
-                            .map(tick -> ServerSentEvent.<String>builder()
-                                    .comment("heartbeat")
-                                    .build())
-                            .takeUntilOther(eventStream.then().thenReturn(true));
-
-                    return Flux.merge(eventStream, heartbeat)
-                            .doOnSubscribe(s -> log.info(
-                                    "[TaskController] SSE 连接建立 taskId={}", taskId))
-                            .doOnCancel(() -> log.info(
-                                    "[TaskController] SSE 连接断开 taskId={}", taskId))
-                            .doOnComplete(() -> log.info(
-                                    "[TaskController] SSE 流完成 taskId={}", taskId));
-                });
+    private Flux<ServerSentEvent<String>> buildStream(String taskId, String lastEventId, Task task) {
+        Flux<ServerSentEvent<String>> realtime = ssePool.subscribeRealtime(taskId);
+        Flux<ServerSentEvent<String>> recovered = eventStore == null
+                ? Flux.empty()
+                : eventStore.replay(taskId, lastEventId);
+        if (parseStatus(task).isTerminal()) {
+            return recovered.switchIfEmpty(Flux.from(buildTerminalEvent(taskId, parseStatus(task), task)));
+        }
+        Flux<ServerSentEvent<String>> events = Flux.merge(recovered, realtime)
+                .distinct(ServerSentEvent::id);
+        Flux<ServerSentEvent<String>> heartbeat = Flux.interval(HEARTBEAT_INTERVAL)
+                .map(tick -> ServerSentEvent.<String>builder().comment("heartbeat").build());
+        return Flux.merge(events, heartbeat)
+                .doOnSubscribe(ignored -> log.info("[TaskController] SSE 连接建立 taskId={}", taskId))
+                .doOnCancel(() -> log.info("[TaskController] SSE 连接断开 taskId={}", taskId));
     }
 
     /**
@@ -119,11 +120,13 @@ public class TaskController {
      * @return 任务实体
      */
     @GetMapping("/tasks/{id}")
-    public Mono<ResponseEntity<Task>> getTask(@PathVariable("id") String taskId) {
-        log.debug("[TaskController] GET /tasks/{}", taskId);
-        return orchestrator.findById(taskId)
+    public Mono<ResponseEntity<Task>> getTask(
+            @PathVariable("id") String taskId,
+            @RequestHeader("X-User-Id") Long userId) {
+        log.debug("[TaskController] GET /tasks/{} userId={}", taskId, userId);
+        return orchestrator.findByIdAndUserId(taskId, userId)
                 .map(ResponseEntity::ok)
-                .switchIfEmpty(Mono.just(ResponseEntity.notFound().build()));
+                .switchIfEmpty(Mono.error(taskNotFound(taskId)));
     }
 
     /**
@@ -135,31 +138,53 @@ public class TaskController {
      * @return 更新后的任务实体（含 404 如果任务不存在）
      */
     @PostMapping("/tasks/{id}/cancel")
-    public Mono<ResponseEntity<Task>> cancelTask(@PathVariable("id") String taskId) {
-        log.debug("[TaskController] POST /tasks/{}/cancel", taskId);
-        return orchestrator.cancelTask(taskId)
-                .map(task -> {
-                    // 仅当状态实际变为 CANCELLED 时才推送 SSE 事件
-                    if (TaskStatus.CANCELLED.name().equals(task.getStatus())) {
-                        try {
-                            Map<String, Object> doneData = new LinkedHashMap<>();
-                            doneData.put("taskId", taskId);
-                            doneData.put("status", "CANCELLED");
+    public Mono<ResponseEntity<Task>> cancelTask(
+            @PathVariable("id") String taskId,
+            @RequestHeader("X-User-Id") Long userId) {
+        log.debug("[TaskController] POST /tasks/{}/cancel userId={}", taskId, userId);
+        return orchestrator.cancelTask(taskId, userId)
+                .flatMap(task -> publishCancelEvent(taskId, task).thenReturn(ResponseEntity.ok(task)))
+                .switchIfEmpty(Mono.error(taskNotFound(taskId)));
+    }
 
-                            ServerSentEvent<String> cancelEvent = ServerSentEvent.<String>builder()
-                                    .event("done")
-                                    .data(objectMapper.writeValueAsString(doneData))
-                                    .id(taskId + ":cancelled")
-                                    .build();
-                            ssePool.emit(taskId, cancelEvent);
-                            ssePool.complete(taskId);
-                        } catch (JsonProcessingException e) {
-                            log.warn("[TaskController] JSON 序列化失败 taskId={}", taskId, e);
-                        }
-                    }
-                    return ResponseEntity.ok(task);
-                })
-                .switchIfEmpty(Mono.just(ResponseEntity.notFound().build()));
+    /**
+     * Persists the cancellation event before local fan-out. A durable SSE write failure is logged
+     * but never rolls back an already committed cancellation.
+     */
+    private Mono<Void> publishCancelEvent(String taskId, Task task) {
+        if (!TaskStatus.CANCELLED.name().equals(task.getStatus())) {
+            return Mono.empty();
+        }
+        try {
+            Map<String, Object> doneData = new LinkedHashMap<>();
+            doneData.put("taskId", taskId);
+            doneData.put("status", "CANCELLED");
+            ServerSentEvent<String> event = ServerSentEvent.<String>builder()
+                    .event("done")
+                    .data(objectMapper.writeValueAsString(doneData))
+                    .build();
+            Mono<ServerSentEvent<String>> persisted = eventStore == null
+                    ? Mono.just(event)
+                    : eventStore.append(taskId, event);
+            return persisted.doOnNext(stored -> {
+                if (!ssePool.emit(taskId, stored)) {
+                    log.warn("[TaskController] cancellation SSE local fan-out failed taskId={}", taskId);
+                }
+            })
+                    .onErrorResume(error -> {
+                        log.warn("[TaskController] cancellation SSE persistence failed taskId={}", taskId, error);
+                        return Mono.empty();
+                    })
+                    .then(Mono.fromRunnable(() -> ssePool.complete(taskId)));
+        } catch (JsonProcessingException error) {
+            log.warn("[TaskController] cancellation event JSON serialization failed taskId={}", taskId, error);
+            ssePool.complete(taskId);
+            return Mono.empty();
+        }
+    }
+
+    private static BusinessException taskNotFound(String taskId) {
+        return new BusinessException(HttpStatus.NOT_FOUND, "TASK_NOT_FOUND", "任务不存在: " + taskId);
     }
 
     // ========================================================================
