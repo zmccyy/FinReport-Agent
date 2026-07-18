@@ -1,0 +1,92 @@
+/*
+ * FinReport Agent 全局样式与设计令牌。
+ * 金融主题：深蓝主色 + 干净中性色，专业、克制。
+ */
+
+:root {
+  /* 品牌色 */
+  --fin-primary: #1a5276;
+  --fin-primary-light: #2e86c1;
+  --fin-primary-lighter: #5da9dd;
+  --fin-primary-bg: #eaf3fa;
+
+  /* 语义色 */
+  --fin-success: #27ae60;
+  --fin-warning: #e67e22;
+  --fin-danger: #c0392b;
+  --fin-info: #7f8c9b;
+
+  /* 中性色 */
+  --fin-bg: #f3f6fa;
+  --fin-card-bg: #ffffff;
+  --fin-text-primary: #1f2d3d;
+  --fin-text-regular: #4a5a6a;
+  --fin-text-secondary: #8a97a5;
+  --fin-border: #e3e9f0;
+
+  /* 阴影 */
+  --fin-shadow-sm: 0 1px 3px rgba(26, 82, 118, 0.08);
+  --fin-shadow-md: 0 4px 16px rgba(26, 82, 118, 0.1);
+  --fin-shadow-lg: 0 12px 32px rgba(26, 82, 118, 0.16);
+
+  /* 圆角 */
+  --fin-radius: 10px;
+  --fin-radius-sm: 6px;
+
+  /* Element Plus 主色对齐品牌色 */
+  --el-color-primary: var(--fin-primary-light);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  color: var(--fin-text-primary);
+  background: var(--fin-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 通用容器宽度 */
+.fin-container {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* 通用卡片 */
+.fin-card {
+  background: var(--fin-card-bg);
+  border: 1px solid var(--fin-border);
+  border-radius: var(--fin-radius);
+  box-shadow: var(--fin-shadow-sm);
+}
+
+/* 页面淡入 */
+@keyframes fin-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fin-fade-up {
+  animation: fin-fade-up 0.32s ease both;
+}
