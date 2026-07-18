@@ -4,13 +4,16 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 
 /**
- * WebFlux Security 最小配置。
+ * WebFlux Security 配置。
  *
- * <p>M1.08 前：放行所有请求，保证骨架链路可运行。
- * M1.08 将启用 JWT 认证和路径保护。</p>
+ * <p>M1.08：JWT 认证由 {@link com.finreport.security.JwtFilter} 负责（WebFilter），
+ * SecurityConfig 仅提供 PasswordEncoder Bean 和 CSRF/表单禁用。
+ * 路径保护完全在 JwtFilter 中实现，避免 SecurityContext 双写问题。</p>
  */
 @Configuration
 @EnableWebFluxSecurity
@@ -20,9 +23,16 @@ public class SecurityConfig {
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
         return http
                 .csrf(ServerHttpSecurity.CsrfSpec::disable)
+                .formLogin(ServerHttpSecurity.FormLoginSpec::disable)
+                .httpBasic(ServerHttpSecurity.HttpBasicSpec::disable)
                 .authorizeExchange(exchanges -> exchanges
-                        .anyExchange().permitAll() // M1.08 启用认证后收紧
+                        .anyExchange().permitAll()
                 )
                 .build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder(10);
     }
 }

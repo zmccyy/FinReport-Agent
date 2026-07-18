@@ -12,8 +12,12 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "jwt")
 public class JwtConfig {
 
+    /** 仅允许在 local profile 中使用的开发密钥。 */
+    static final String LOCAL_DEVELOPMENT_SECRET =
+            "finreport-local-development-secret-only-change-before-deployment";
+
     /** JWT 签名密钥（至少 256 bits） */
-    private String secret = "finreport-jwt-secret-key-change-in-production-min-256-bits";
+    private String secret;
 
     /** Access Token 有效期（秒），默认 1 小时 */
     private long accessExpiration = 3600;

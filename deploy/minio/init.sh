@@ -1,60 +1,34 @@
 #!/bin/sh
-# ============================================================================
-# FinReport Agent — MinIO bucket 初始化脚本
-# 在 MinIO 容器启动后执行（通过 docker-compose depends_on + 自定义入口）
-# 幂等：重复执行安全（mc mb 在桶已存在时静默跳过）
-# ============================================================================
-# 用法（容器内）:
-#   ./init.sh                          # 使用默认配置
-# 用法（宿主机 docker exec）:
-#   docker compose -f deploy/docker-compose.yml exec minio mc alias set local http://localhost:9000 minioadmin minioadmin
-#   docker compose -f deploy/docker-compose.yml exec minio sh /data/init.sh
-# ============================================================================
+# FinReport Agent — Compose MinIO 初始化。
+# 幂等：可在每次 compose up 时安全重跑；生产环境应以受管策略替换开发策略。
+set -eu
 
-set -e
+MINIO_ALIAS="finreport"
+MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://minio:9000}"
 
-# --- 配置 ---
-MINIO_ALIAS="${MINIO_ALIAS:-local}"
-MINIO_ENDPOINT="${MINIO_ENDPOINT:-http://localhost:9000}"
-MINIO_ROOT_USER="${MINIO_ROOT_USER:-minioadmin}"
-MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-minioadmin}"
+mc alias set "$MINIO_ALIAS" "$MINIO_ENDPOINT" "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
 
-echo "=== FinReport Agent — MinIO Bucket 初始化 ==="
-echo "Alias: ${MINIO_ALIAS} | Endpoint: ${MINIO_ENDPOINT}"
+# spec §5.5.1 的业务 bucket；a-bucket 是 Milvus standalone 的对象存储 bucket。
+for bucket in finreport-uploads finreport-artifacts finreport-reports finreport-models finreport-training finreport-backups a-bucket; do
+    mc mb --ignore-existing "$MINIO_ALIAS/$bucket"
+done
 
-# --- 配置 mc alias ---
-if ! mc alias set "${MINIO_ALIAS}" "${MINIO_ENDPOINT}" "${MINIO_ROOT_USER}" "${MINIO_ROOT_PASSWORD}"; then
-    echo "[WARN] mc alias 配置失败（可能已存在），继续..."
-fi
+# 只有最终报告可被开发环境匿名下载；上传文件和中间产物保持私有。
+for bucket in finreport-uploads finreport-artifacts finreport-models finreport-training finreport-backups a-bucket; do
+    mc anonymous set private "$MINIO_ALIAS/$bucket" >/dev/null
+done
+mc anonymous set download "$MINIO_ALIAS/finreport-reports" >/dev/null
 
-# --- 创建 6 个 bucket（幂等：桶已存在时静默成功）---
-mc mb --ignore-existing "${MINIO_ALIAS}/finreport-uploads"
-mc mb --ignore-existing "${MINIO_ALIAS}/finreport-artifacts"
-mc mb --ignore-existing "${MINIO_ALIAS}/finreport-reports"
-mc mb --ignore-existing "${MINIO_ALIAS}/finreport-models"
-mc mb --ignore-existing "${MINIO_ALIAS}/finreport-training"
-mc mb --ignore-existing "${MINIO_ALIAS}/finreport-backups"
+# mc 在没有生命周期配置时返回非零；已有配置时不重复添加规则。
+ensure_expiration_rule() {
+    bucket="$1"
+    days="$2"
+    if ! mc ilm rule ls "$MINIO_ALIAS/$bucket" >/dev/null 2>&1; then
+        mc ilm rule add --expire-days "$days" "$MINIO_ALIAS/$bucket" >/dev/null
+    fi
+}
 
-echo "✓ 6 个 bucket 已就绪"
+ensure_expiration_rule finreport-uploads 90
+ensure_expiration_rule finreport-artifacts 7
 
-# --- 生命周期规则 ---
-# artifacts: 7 天后自动删除（spec §5.5.3）
-mc ilm rule add --expire-days "7" "${MINIO_ALIAS}/finreport-artifacts" || echo "  [WARN] ilm rule for finreport-artifacts failed"
-echo "  └─ finreport-artifacts: 7 天过期"
-
-# uploads: 90 天后过期（本地点替代 30 天→IA 转换）
-mc ilm rule add --expire-days "90" "${MINIO_ALIAS}/finreport-uploads" || echo "  [WARN] ilm rule for finreport-uploads failed"
-echo "  └─ finreport-uploads: 90 天过期"
-
-# --- 访问策略 ---
-# reports: 允许公开读取（预签名 URL）
-mc anonymous set download "${MINIO_ALIAS}/finreport-reports" || echo "  [WARN] anonymous policy for finreport-reports failed"
-echo "  └─ finreport-reports: public-read"
-
-# --- 验证 ---
-echo ""
-echo "=== Bucket 列表 ==="
-mc ls "${MINIO_ALIAS}/"
-
-echo ""
-echo "=== 初始化完成 ==="
+printf '%s\n' 'MinIO buckets, development access policies, and lifecycle rules initialized.'

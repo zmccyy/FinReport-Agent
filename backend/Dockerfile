@@ -44,7 +44,7 @@ USER finreport
 
 # 健康检查
 HEALTHCHECK --interval=15s --timeout=5s --retries=3 --start-period=60s \
-    CMD curl -sf http://localhost:8080/api/v1/system/health || exit 1
+    CMD curl -sf http://localhost:8080/internal/health || exit 1
 
 ENTRYPOINT ["sh", "-c", "java ${JAVA_OPTS} -jar /app/app.jar"]
 
@@ -56,13 +56,15 @@ WORKDIR /app
 
 RUN apk add --no-cache curl
 
-COPY pom.xml .
+COPY pom.xml mvnw ./
+COPY .mvn ./.mvn
 
-RUN --mount=type=cache,target=/root/.m2 \
-    mvn dependency:resolve -DskipTests -B -q
+# 依赖写入镜像层；开发 overlay 不再用空的命名卷覆盖 /root/.m2，
+# 保证干净 Compose 环境首次启动无需在健康检查窗口内重新下载全部依赖。
+RUN chmod +x mvnw && ./mvnw dependency:go-offline -DskipTests -B -q
 
 COPY src ./src
 
 EXPOSE 8080 5005
 
-CMD ["mvn", "spring-boot:run"]
+CMD ["./mvnw", "spring-boot:run"]

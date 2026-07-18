@@ -2,6 +2,7 @@ package com.finreport.security;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.UUID;
 
 import javax.crypto.SecretKey;
 
@@ -84,6 +85,16 @@ public class JwtUtil {
     }
 
     /**
+     * 从 Token 中提取 JWT ID（jti）。
+     *
+     * @param token JWT 字符串
+     * @return jti 值
+     */
+    public String getJti(String token) {
+        return parseToken(token).getId();
+    }
+
+    /**
      * 检查 Token 是否已过期。
      */
     public boolean isExpired(String token) {
@@ -122,6 +133,7 @@ public class JwtUtil {
                 .issuer(jwtConfig.getIssuer())
                 .subject(username)
                 .claim("userId", userId)
+                .id(UUID.randomUUID().toString())
                 .issuedAt(now)
                 .expiration(expiry)
                 .signWith(secretKey)

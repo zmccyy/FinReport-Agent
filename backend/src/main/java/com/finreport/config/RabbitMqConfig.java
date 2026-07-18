@@ -2,6 +2,7 @@ package com.finreport.config;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.amqp.rabbit.config.SimpleRabbitListenerContainerFactory;
@@ -41,7 +42,10 @@ public class RabbitMqConfig {
     }
 
     /**
-     * 消费者监听容器 — prefetch=1（按显存容量限流）。
+     * 消费者监听容器 — prefetch=1 + MANUAL ack（spec §3.1, §8.3）。
+     *
+     * <p>手动 ack：业务成功才 ack；失败 nack(requeue=false) 进 DLQ。
+     * 使用 {@code @RabbitListener} 的方法需声明 {@code Channel} 参数自行 ack。</p>
      */
     @Bean
     public RabbitListenerContainerFactory<?> rabbitListenerContainerFactory(ConnectionFactory connectionFactory) {
@@ -49,6 +53,7 @@ public class RabbitMqConfig {
         factory.setConnectionFactory(connectionFactory);
         factory.setMessageConverter(messageConverter());
         factory.setPrefetchCount(1); // spec §3.1
+        factory.setAcknowledgeMode(AcknowledgeMode.MANUAL); // spec §8.3
         return factory;
     }
 }

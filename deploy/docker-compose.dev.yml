@@ -76,7 +76,6 @@ services:
     volumes:
       - ../backend/src:/app/src:ro
       - ../backend/pom.xml:/app/pom.xml:ro
-      - backend_m2:/root/.m2             # Maven 缓存持久化
     environment:
       JAVA_OPTS: >
         -Xms256m -Xmx512m
@@ -84,6 +83,8 @@ services:
         -Dspring.devtools.restart.enabled=true
         -Dspring.devtools.livereload.enabled=false
       LOG_LEVEL: DEBUG
+      # 仅供本地开发；生产环境必须通过受管密钥注入 JWT_SECRET。
+      JWT_SECRET: ${JWT_SECRET:-finreport-dev-jwt-secret-must-be-at-least-32-characters}
     ports:
       - "8080:8080"
       - "5005:5005"                       # Java 远程调试端口
@@ -106,8 +107,9 @@ services:
       VITE_API_BASE_URL: http://localhost:8080
       VITE_SSE_BASE_URL: http://localhost:8080
     command: npm run dev -- --host 0.0.0.0
-    ports:
-      - "80:5173"                         # Vite dev server on port 80 mapping
+    # 该 overlay 替换生产 Nginx 的 80 映射，避免 Windows 常见的 HTTP.sys 端口占用。
+    ports: !override
+      - "${FRONTEND_PORT:-5173}:5173"     # Vite development server
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:5173/"]
       start_period: 20s
@@ -119,7 +121,5 @@ services:
 volumes:
   ai_cache:
     name: finreport-ai-cache
-  backend_m2:
-    name: finreport-backend-m2
   frontend_node_modules:
     name: finreport-frontend-node-modules
