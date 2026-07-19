@@ -499,6 +499,98 @@ class TaskOrchestratorTest {
         }
 
         @Test
+        @DisplayName("should dispatch all extraction steps when PARSE succeeds")
+        void shouldDispatchAllExtractionStepsWhenParseSucceeds() {
+            Task task = Task.builder()
+                    .id("task-parallel-extraction")
+                    .status(TaskStatus.PARSE_RUNNING.name())
+                    .payload("{\"pdfObjectKey\":\"uploads/7/report.pdf\"}")
+                    .build();
+            TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
+                    .status(StepStatus.RUNNING.name()).build();
+            TaskStep balanceSheet = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
+                    .status(StepStatus.PENDING.name()).build();
+            TaskStep incomeStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_IS")
+                    .status(StepStatus.PENDING.name()).build();
+            TaskStep cashFlowStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_CF")
+                    .status(StepStatus.PENDING.name()).build();
+            Map<String, Object> payload = Map.of("pdfObjectKey", "uploads/7/report.pdf");
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(balanceSheet));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS")).thenReturn(Mono.just(incomeStatement));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_CF")).thenReturn(Mono.just(cashFlowStatement));
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of())
+                            .contextWrite(context -> context.put(TraceContext.TRACE_ID, "parallel-trace")))
+                    .assertNext(saved -> {
+                        assertEquals(TaskStatus.EXTRACT_RUNNING.name(), saved.getStatus());
+                        assertEquals("EXTRACT_BS", saved.getCurrentStep());
+                    })
+                    .verifyComplete();
+
+            assertEquals(StepStatus.RUNNING.name(), balanceSheet.getStatus());
+            assertEquals(StepStatus.RUNNING.name(), incomeStatement.getStatus());
+            assertEquals(StepStatus.RUNNING.name(), cashFlowStatement.getStatus());
+            verify(messageProducer).publishTaskStep(
+                    task.getId(), "extract.bs", payload, "parallel-trace");
+            verify(messageProducer).publishTaskStep(
+                    task.getId(), "extract.is", payload, "parallel-trace");
+            verify(messageProducer).publishTaskStep(
+                    task.getId(), "extract.cf", payload, "parallel-trace");
+        }
+
+        @Test
+        @DisplayName("should mark the task failed when an extraction message cannot be published")
+        void shouldMarkTaskFailedWhenExtractionMessageCannotBePublished() {
+            Task task = Task.builder()
+                    .id("task-extraction-publish-failure")
+                    .status(TaskStatus.PARSE_RUNNING.name())
+                    .payload("{\"pdfObjectKey\":\"uploads/7/report.pdf\"}")
+                    .build();
+            TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
+                    .status(StepStatus.RUNNING.name()).build();
+            TaskStep balanceSheet = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
+                    .status(StepStatus.PENDING.name()).build();
+            TaskStep incomeStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_IS")
+                    .status(StepStatus.PENDING.name()).build();
+            TaskStep cashFlowStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_CF")
+                    .status(StepStatus.PENDING.name()).build();
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(balanceSheet));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS")).thenReturn(Mono.just(incomeStatement));
+            doAnswer(invocation -> {
+                if ("extract.is".equals(invocation.getArgument(1))) {
+                    throw new IntegrationException(
+                            org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                            "MQ_PUBLISH_FAILED", "RabbitMQ is unavailable");
+                }
+                return null;
+            }).when(messageProducer).publishTaskStep(
+                    eq(task.getId()), anyString(), any(Map.class), eq("failure-trace"));
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of())
+                            .contextWrite(context -> context.put(TraceContext.TRACE_ID, "failure-trace")))
+                    .expectErrorMatches(error -> error instanceof IntegrationException integrationException
+                            && "MQ_PUBLISH_FAILED".equals(integrationException.getErrorCode()))
+                    .verify();
+
+            assertEquals(TaskStatus.FAILED.name(), task.getStatus());
+            assertEquals(StepStatus.RUNNING.name(), balanceSheet.getStatus());
+            assertEquals(StepStatus.FAILED.name(), incomeStatement.getStatus());
+            assertEquals(StepStatus.PENDING.name(), cashFlowStatement.getStatus());
+            verify(messageProducer, never()).publishTaskStep(
+                    task.getId(), "extract.cf", Map.of("pdfObjectKey", "uploads/7/report.pdf"), "failure-trace");
+        }
+
+        @Test
         @DisplayName("should retain EXTRACT_PARTIAL until every extraction step succeeds")
         void shouldRetainPartialExtractionUntilAllStepsSucceed() {
             Task task = Task.builder().id("task-extract-partial").status(TaskStatus.EXTRACT_RUNNING.name()).build();

@@ -70,7 +70,20 @@ class SecurityComponentsTest {
 
             assertEquals("/internal/live", livePassed.get().getRequest().getPath().value());
             assertEquals("/internal/health", readinessPassed.get().getRequest().getPath().value());
+        }        @Test
+        @DisplayName("should bypass CORS preflight without authorization")
+        void shouldBypassCorsPreflightWithoutAuthorization() {
+            JwtFilter filter = new JwtFilter(jwtUtil, authService);
+            AtomicReference<ServerWebExchange> passed = new AtomicReference<>();
+            MockServerWebExchange exchange = MockServerWebExchange.from(
+                    MockServerHttpRequest.options("/api/v1/users/me").build());
+
+            filter.filter(exchange, capture(passed)).block();
+
+            assertEquals("OPTIONS", passed.get().getRequest().getMethod().name());
         }
+
+
 
         @Test
         @DisplayName("should respond unauthorized when authorization header is absent")

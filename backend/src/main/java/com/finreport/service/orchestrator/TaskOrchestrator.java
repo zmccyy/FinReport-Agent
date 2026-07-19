@@ -42,6 +42,10 @@ public class TaskOrchestrator {
     private static final int PROGRESS_EXTRACT = 55;
     private static final int PROGRESS_CHECK = 75;
     private static final int PROGRESS_REPORT = 100;
+    private static final List<TaskStepName> EXTRACTION_STEPS = List.of(
+            TaskStepName.EXTRACT_BS,
+            TaskStepName.EXTRACT_IS,
+            TaskStepName.EXTRACT_CF);
 
     private final TaskRepository taskRepo;
     private final TaskStepRepository stepRepo;
@@ -432,7 +436,7 @@ public class TaskOrchestrator {
                                                 .thenReturn(saved)
                                                 .onErrorResume(com.finreport.exception.IntegrationException.class,
                                                         error -> markDispatchFailed(saved, stepRecord, error)
-                                                                .then(Mono.error(error)));
+                                                                .then(Mono.<Task>error(error)));
                                     }));
                 });
     }
@@ -511,6 +515,10 @@ public class TaskOrchestrator {
         updatedTask.setStatus(newStatus.name());
         return taskRepo.save(updatedTask)
                 .flatMap(saved -> {
+                    // PARSE 完成后，三个报表抽取步骤必须一起进入 RUNNING 并分别投递。
+                    if (TaskStepName.PARSE.name().equals(stepName)) {
+                        return dispatchExtractionSteps(saved, buildPayload(saved));
+                    }
                     // REPORT 是最后一个步骤，成功后自动转为 COMPLETED
                     if (newStatus == TaskStatus.REPORT_SUCCESS) {
                         saved.setStatus(TaskStatus.COMPLETED.name());
@@ -525,6 +533,55 @@ public class TaskOrchestrator {
                                 buildPayload(saved));
                     }
                     return Mono.just(saved);
+                });
+    }
+
+    /**
+     * 将三个报表抽取步骤统一切换到运行态并逐个发布到 RabbitMQ。
+     *
+     * <p>任务级状态只从 {@code PARSE_SUCCESS} 转换一次到 {@code EXTRACT_RUNNING}；
+     * 后续三个步骤不能复用 {@link #dispatchStep}，否则会触发不允许的
+     * {@code EXTRACT_RUNNING -> EXTRACT_RUNNING} 自转换。</p>
+     */
+    private Mono<Task> dispatchExtractionSteps(Task task, Map<String, Object> payload) {
+        TaskStatus current = TaskStatus.valueOf(task.getStatus());
+        if (!stateMachine.canTransition(current, TaskStatus.EXTRACT_RUNNING)) {
+            return Mono.error(new BusinessException(
+                    org.springframework.http.HttpStatus.CONFLICT,
+                    "INVALID_TRANSITION",
+                    String.format("无法从 %s 转换到 %s", current, TaskStatus.EXTRACT_RUNNING)));
+        }
+
+        task.setStatus(TaskStatus.EXTRACT_RUNNING.name());
+        task.setCurrentStep(TaskStepName.EXTRACT_BS.name());
+        return taskRepo.save(task)
+                .flatMap(saved -> Flux.fromIterable(EXTRACTION_STEPS)
+                        .concatMap(step -> markExtractionStepRunningAndPublish(saved, step, payload))
+                        .then(Mono.just(saved)));
+    }
+
+    /**
+     * 将单个抽取步骤标记为 RUNNING 并发布对应的持久化消息。
+     */
+    private Mono<Void> markExtractionStepRunningAndPublish(
+            Task task, TaskStepName step, Map<String, Object> payload) {
+        return stepRepo.findByTaskIdAndStepName(task.getId(), step.name())
+                .switchIfEmpty(Mono.error(new BusinessException(
+                        org.springframework.http.HttpStatus.NOT_FOUND,
+                        "TASK_STEP_NOT_FOUND", "任务步骤不存在: " + step.name())))
+                .flatMap(stepRecord -> {
+                    stepRecord.setStatus(StepStatus.RUNNING.name());
+                    stepRecord.setStartedAt(LocalDateTime.now());
+                    return stepRepo.save(stepRecord)
+                            .then(Mono.deferContextual(context -> Mono.<Void>fromRunnable(() ->
+                                    messageProducer.publishTaskStep(
+                                            task.getId(),
+                                            step.getRoutingKey(),
+                                            payload,
+                                            context.getOrDefault(TraceContext.TRACE_ID, "")))))
+                            .onErrorResume(com.finreport.exception.IntegrationException.class,
+                                    error -> markDispatchFailed(task, stepRecord, error)
+                                            .then(Mono.<Void>error(error)));
                 });
     }
 
