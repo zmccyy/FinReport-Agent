@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DEVELOPMENT_COMPOSE_FILE = REPOSITORY_ROOT / "deploy" / "docker-compose.dev.yml"
 
