@@ -61,7 +61,8 @@ COPY .mvn ./.mvn
 
 # 依赖写入镜像层；开发 overlay 不再用空的命名卷覆盖 /root/.m2，
 # 保证干净 Compose 环境首次启动无需在健康检查窗口内重新下载全部依赖。
-RUN chmod +x mvnw && ./mvnw dependency:go-offline -DskipTests -B -q
+# Windows 工作区可能检出 CRLF；若不规范化，Linux 会把 /bin/sh\r 当成解释器而无法执行 wrapper。
+RUN sed -i 's/\r$//' mvnw && chmod +x mvnw && ./mvnw dependency:go-offline -DskipTests -B -q
 
 COPY src ./src
 

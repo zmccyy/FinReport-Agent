@@ -9,6 +9,7 @@ M1.04 - M1.06 初始化脚本单元测试
 测试策略: 从脚本源码中提取纯数据/纯函数进行测试（不依赖外部服务）
 """
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -55,9 +56,9 @@ class TestMinioBuckets:
             "finreport-backups",
         ]
         for bucket in expected_buckets:
-            assert f'"{bucket}"' in source or f"'{bucket}'" in source, (
-                f"BUCKETS 中缺少: {bucket}"
-            )
+            assert (
+                f'"{bucket}"' in source or f"'{bucket}'" in source
+            ), f"BUCKETS 中缺少: {bucket}"
 
     def test_artifacts_has_7day_expiry(self):
         """finreport-artifacts 应配置 7 天过期（spec §5.5.3）。"""
@@ -65,9 +66,11 @@ class TestMinioBuckets:
         # artifacts 的 expiry_days 应为 7
         assert '"finreport-artifacts"' in source
         # 验证 lifecycle 中包含 expiry_days: 7 的赋值
-        assert 'expiry_days' in source
+        assert "expiry_days" in source
         # 在 artifacts 相关的 lifecycle 块上下文中有 7
-        artifacts_section = source.split('"finreport-artifacts"')[1].split('"finreport-reports"')[0]
+        artifacts_section = source.split('"finreport-artifacts"')[1].split(
+            '"finreport-reports"'
+        )[0]
         assert "7" in artifacts_section
 
     def test_reports_has_public_read(self):
@@ -122,14 +125,14 @@ class TestMilvusCollection:
     def test_embedding_dim_is_512(self):
         """embedding 向量维度应为 512（bge-small 输出）。"""
         source = (SCRIPTS_DIR / "init_milvus.py").read_text(encoding="utf-8")
-        assert 'dim=512' in source, "embedding 维度应为 512"
+        assert "dim=512" in source, "embedding 维度应为 512"
 
     def test_hnsw_params_match_spec(self):
         """HNSW 索引参数应匹配 spec §5.3: M=16, efConstruction=200, IP。"""
         source = (SCRIPTS_DIR / "init_milvus.py").read_text(encoding="utf-8")
         assert '"M": 16' in source or "'M': 16" in source
         assert '"efConstruction": 200' in source or "'efConstruction': 200" in source
-        assert 'IP' in source, "距离度量应为 IP（内积）"
+        assert "IP" in source, "距离度量应为 IP（内积）"
 
     def test_search_ef_is_64(self):
         """查询 ef 参数应为 64。"""
@@ -144,11 +147,20 @@ class TestMilvusCollection:
     def test_required_fields_exist(self):
         """所有 spec 要求的字段都应存在。"""
         source = (SCRIPTS_DIR / "init_milvus.py").read_text(encoding="utf-8")
-        required_fields = ["id", "doc_id", "chunk_id", "embedding", "page", "position", "chunk_type", "text"]
+        required_fields = [
+            "id",
+            "doc_id",
+            "chunk_id",
+            "embedding",
+            "page",
+            "position",
+            "chunk_type",
+            "text",
+        ]
         for field in required_fields:
-            assert f'name="{field}"' in source or f"name='{field}'" in source, (
-                f"缺少字段: {field}"
-            )
+            assert (
+                f'name="{field}"' in source or f"name='{field}'" in source
+            ), f"缺少字段: {field}"
 
     def test_dry_run_executes(self):
         """--dry-run 应正常执行不报错。"""
@@ -177,9 +189,9 @@ class TestRabbitMQTopology:
             "kb.exchange",
         ]
         for name in exchange_names:
-            assert f'"{name}"' in source or f"'{name}'" in source, (
-                f"缺少 exchange: {name}"
-            )
+            assert (
+                f'"{name}"' in source or f"'{name}'" in source
+            ), f"缺少 exchange: {name}"
 
     def test_queues_count_is_six(self):
         """应有恰好 6 个核心队列。"""
@@ -193,18 +205,20 @@ class TestRabbitMQTopology:
             "q.kb.build",
         ]
         for name in queue_names:
-            assert f'"{name}"' in source or f"'{name}'" in source, (
-                f"缺少队列: {name}"
-            )
+            assert f'"{name}"' in source or f"'{name}'" in source, f"缺少队列: {name}"
 
     def test_all_queues_have_dlq(self):
         """每个核心队列都应有对应的 DLQ: q.{name}.dlq。"""
         source = (SCRIPTS_DIR / "declare_mq.py").read_text(encoding="utf-8")
         # 验证 DLQ 命名模式出现在代码中
         assert "dlq_name" in source or ".dlq" in source
-        assert 'f"{q.name}.dlq"' in source or "q.name}.dlq" in source or '.dlq"' in source
+        assert (
+            'f"{q.name}.dlq"' in source or "q.name}.dlq" in source or '.dlq"' in source
+        )
         # 也检查 definitions.json
-        defs = json.loads((DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8"))
+        defs = json.loads(
+            (DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8")
+        )
         dlq_count = sum(1 for q in defs["queues"] if q["name"].endswith(".dlq"))
         assert dlq_count == 6, f"definitions.json 中应有 6 个 DLQ，实际 {dlq_count}"
 
@@ -224,8 +238,12 @@ class TestRabbitMQTopology:
             ("kb.exchange", "q.kb.build", "kb.build.industry"),
         ]
         for ex, qu, rk in required_bindings:
-            assert f'"{ex}"' in source or f"'{ex}'" in source, f"Binding 缺少 exchange: {ex}"
-            assert f'"{qu}"' in source or f"'{qu}'" in source, f"Binding 缺少 queue: {qu}"
+            assert (
+                f'"{ex}"' in source or f"'{ex}'" in source
+            ), f"Binding 缺少 exchange: {ex}"
+            assert (
+                f'"{qu}"' in source or f"'{qu}'" in source
+            ), f"Binding 缺少 queue: {qu}"
 
     def test_exchange_types_match_spec(self):
         """Exchange 类型应与 spec 一致。"""
@@ -239,7 +257,9 @@ class TestRabbitMQTopology:
         source = (SCRIPTS_DIR / "declare_mq.py").read_text(encoding="utf-8")
         assert "7 * 24 * 60 * 60 * 1000" in source or "604800000" in source
         # 也检查 definitions.json
-        defs = json.loads((DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8"))
+        defs = json.loads(
+            (DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8")
+        )
         for q in defs["queues"]:
             if q["name"].endswith(".dlq"):
                 ttl = q.get("arguments", {}).get("x-message-ttl")
@@ -247,33 +267,51 @@ class TestRabbitMQTopology:
 
     def test_all_queues_are_durable(self):
         """所有队列应设置 durable=true + delivery_mode=2。"""
-        defs = json.loads((DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8"))
+        defs = json.loads(
+            (DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8")
+        )
         for q in defs["queues"]:
             assert q["durable"] is True, f"{q['name']} 应为 durable=true"
 
     def test_all_exchanges_are_durable(self):
         """所有 exchange 应设置 durable=true。"""
-        defs = json.loads((DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8"))
+        defs = json.loads(
+            (DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8")
+        )
         for ex in defs["exchanges"]:
             assert ex["durable"] is True, f"{ex['name']} 应为 durable=true"
 
     def test_definitions_json_is_valid(self):
-        """definitions.json 应为合法的 RabbitMQ 定义文件。"""
-        defs = json.loads((DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8"))
+        """definitions.json 应包含完整的基础、DLQ 和延迟重试拓扑。"""
+        defs = json.loads(
+            (DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8")
+        )
         assert "rabbit_version" in defs
         assert "queues" in defs
         assert "exchanges" in defs
         assert "bindings" in defs
-        # 12 队列 = 6 核心 + 6 DLQ
-        assert len(defs["queues"]) == 12, f"总共应有 12 个队列，实际 {len(defs['queues'])}"
-        # 4 exchange
-        assert len(defs["exchanges"]) == 4, f"应有 4 个 exchange，实际 {len(defs['exchanges'])}"
-        # 10 binding
-        assert len(defs["bindings"]) == 10, f"应有 10 个 binding，实际 {len(defs['bindings'])}"
+
+        module_path = SCRIPTS_DIR / "declare_mq.py"
+        spec = importlib.util.spec_from_file_location(
+            "finreport_mq_topology", module_path
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+
+        expected_queue_count = len(module.QUEUES) * 2 + len(module.RETRY_DELAYS_MS)
+        expected_exchange_count = len(module.EXCHANGES)
+        expected_binding_count = len(module.BINDINGS)
+        assert len(defs["queues"]) == expected_queue_count
+        assert len(defs["exchanges"]) == expected_exchange_count
+        assert len(defs["bindings"]) == expected_binding_count
 
     def test_dlq_max_length_is_set(self):
         """DLQ 应有最大长度限制。"""
-        defs = json.loads((DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8"))
+        defs = json.loads(
+            (DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8")
+        )
         for q in defs["queues"]:
             if q["name"].endswith(".dlq"):
                 max_len = q.get("arguments", {}).get("x-max-length")
@@ -347,35 +385,71 @@ class TestMinioInitShell:
 
 
 class TestDefinitionsConsistency:
-    """definitions.json 与 declare_mq.py 应包含相同的拓扑。"""
+    """definitions.json 与声明脚本必须表达同一完整 RabbitMQ 拓扑。"""
+
+    @staticmethod
+    def load_declaration_module():
+        """Load topology constants without invoking the script command-line entry point."""
+        module_path = SCRIPTS_DIR / "declare_mq.py"
+        spec = importlib.util.spec_from_file_location(
+            "finreport_declare_mq", module_path
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    @staticmethod
+    def load_definitions() -> dict:
+        """Return RabbitMQ bootstrap definitions as a parsed document."""
+        path = DEPLOY_DIR / "rabbitmq" / "definitions.json"
+        return json.loads(path.read_text(encoding="utf-8"))
 
     def test_exchange_names_match(self):
-        """两个文件中的 exchange 名称应一致。"""
-        defs = json.loads((DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8"))
-        source = (SCRIPTS_DIR / "declare_mq.py").read_text(encoding="utf-8")
+        """All baseline and retry exchanges must match exactly."""
+        declarations = self.load_declaration_module()
+        definitions = self.load_definitions()
 
-        json_exchanges = {ex["name"] for ex in defs["exchanges"]}
-        # 检查源码中是否包含这些 exchange
-        for ex_name in json_exchanges:
-            assert ex_name in source, f"definitions.json 中的 {ex_name} 在 declare_mq.py 中未找到"
+        declared = {exchange.name for exchange in declarations.EXCHANGES}
+        configured = {exchange["name"] for exchange in definitions["exchanges"]}
+        assert configured == declared
 
     def test_queue_names_match(self):
-        """核心队列名称应一致；DLQ 由 declare_mq.py 动态生成 (q.{name}.dlq)。"""
-        defs = json.loads((DEPLOY_DIR / "rabbitmq" / "definitions.json").read_text(encoding="utf-8"))
-        source = (SCRIPTS_DIR / "declare_mq.py").read_text(encoding="utf-8")
+        """Core/DLQ/retry queue names must match the declaration script exactly."""
+        declarations = self.load_declaration_module()
+        definitions = self.load_definitions()
 
-        core_queues = [q["name"] for q in defs["queues"] if not q["name"].endswith(".dlq")]
-        dlq_queues = [q["name"] for q in defs["queues"] if q["name"].endswith(".dlq")]
+        declared = {queue.name for queue in declarations.QUEUES}
+        declared.update(f"{queue.name}.dlq" for queue in declarations.QUEUES)
+        declared.update(
+            f"q.task.retry.{delay_name}" for delay_name in declarations.RETRY_DELAYS_MS
+        )
+        configured = {queue["name"] for queue in definitions["queues"]}
+        assert configured == declared
 
-        # 核心队列名称检查
-        for q_name in core_queues:
-            assert q_name in source, f"definitions.json 中的核心队列 {q_name} 在 declare_mq.py 中未找到"
+    def test_bindings_match(self):
+        """Broker bindings must mirror all standard and delayed retry bindings."""
+        declarations = self.load_declaration_module()
+        definitions = self.load_definitions()
 
-        # DLQ 验证: 每个核心队列都应有对应的 DLQ (q.{name}.dlq)
-        for q_name in core_queues:
-            expected_dlq = f"{q_name}.dlq"
-            assert expected_dlq in dlq_queues, (
-                f"缺少 DLQ: {expected_dlq}"
-            )
-        # DLQ 命名模式也应在源代码中出现
-        assert ".dlq" in source, "declare_mq.py 应包含 DLQ 生成逻辑"
+        declared = {
+            (binding.exchange, binding.queue, binding.routing_key)
+            for binding in declarations.BINDINGS
+        }
+        configured = {
+            (binding["source"], binding["destination"], binding["routing_key"])
+            for binding in definitions["bindings"]
+        }
+        assert configured == declared
+
+    def test_retry_queue_arguments_match(self):
+        """Delayed retry queues must TTL then dead-letter back to task.exchange."""
+        declarations = self.load_declaration_module()
+        definitions = self.load_definitions()
+        queues = {queue["name"]: queue for queue in definitions["queues"]}
+
+        for delay_name, ttl_ms in declarations.RETRY_DELAYS_MS.items():
+            arguments = queues[f"q.task.retry.{delay_name}"]["arguments"]
+            assert arguments["x-message-ttl"] == ttl_ms
+            assert arguments["x-dead-letter-exchange"] == "task.exchange"

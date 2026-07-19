@@ -76,9 +76,10 @@ data/training/
 !data/raw_reports/.gitkeep
 !data/training/.gitkeep
 
-# --- Logs ---
+# --- Logs & test diagnostics ---
 *.log
 logs/
+artifacts/
 
 # --- OS ---
 *.tmp
@@ -88,6 +89,7 @@ logs/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+.coverage
 coverage/
 htmlcov/
 .nyc_output/
