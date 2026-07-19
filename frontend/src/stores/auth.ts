@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import * as authApi from '@/api/auth'
 import { clearTokens, getRefreshToken, hasToken, setTokens } from '@/api/token'
@@ -8,18 +8,26 @@ import type { UserInfo } from '@/types'
  * 认证状态 store。
  *
  * token 持久化在 localStorage（见 api/token.ts）；user 信息在登录/恢复时拉取。
+ *
+ * 注意：isAuthenticated 使用手动同步的 ref 而非 computed，因为 hasToken() 读取
+ * localStorage（非 Vue 响应式源），computed 依赖追踪无法感知 localStorage 变更。
  */
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserInfo | null>(null)
   /** 是否已完成启动时的会话恢复（用于路由守卫等待） */
   const restored = ref(false)
+  /** 手动同步的认证状态（localStorage 写入后调用 syncAuthState 更新） */
+  const authenticated = ref(hasToken())
 
-  const isAuthenticated = computed(() => hasToken())
+  function syncAuthState(): void {
+    authenticated.value = hasToken()
+  }
 
   /** 登录并拉取用户信息。 */
   async function login(username: string, password: string): Promise<void> {
     const tokens = await authApi.login(username, password)
     setTokens(tokens.accessToken, tokens.refreshToken)
+    syncAuthState()
     await fetchCurrentUser()
   }
 
@@ -27,6 +35,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function register(username: string, password: string, email?: string): Promise<void> {
     const tokens = await authApi.register(username, password, email)
     setTokens(tokens.accessToken, tokens.refreshToken)
+    syncAuthState()
     await fetchCurrentUser()
   }
 
@@ -40,7 +49,8 @@ export const useAuthStore = defineStore('auth', () => {
    * token 失效时由 http 拦截器统一处理 401（清 token + 跳登录）。
    */
   async function restore(): Promise<void> {
-    if (hasToken() && !user.value) {
+    syncAuthState()
+    if (authenticated.value && !user.value) {
       try {
         await fetchCurrentUser()
       } catch {
@@ -61,13 +71,14 @@ export const useAuthStore = defineStore('auth', () => {
       }
     }
     clearTokens()
+    syncAuthState()
     user.value = null
   }
 
   return {
     user,
     restored,
-    isAuthenticated,
+    isAuthenticated: authenticated,
     login,
     register,
     logout,
