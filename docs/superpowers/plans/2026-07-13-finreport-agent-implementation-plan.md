@@ -1,9 +1,9 @@
 # FinReport Agent 实现计划
 
 > **配套设计文档**：[2026-07-13-finreport-agent-design.md](../specs/2026-07-13-finreport-agent-design.md)
-> **版本**：v1.0
-> **日期**：2026-07-13
-> **状态**：待评审
+> **版本**：v1.1
+> **日期**：2026-07-19（最后更新）
+> **状态**：M1 已完成，M2 待开始
 > **总周期**：12 周 / 6 个里程碑 / 约 720h
 
 ---
@@ -89,22 +89,26 @@ backend/
 ├── pom.xml
 ├── src/main/java/com/finreport/
 │   ├── FinReportApplication.java
-│   ├── config/                # WebFlux/Security/JWT/RabbitMQ/Redis/MinIO 配置
+│   ├── config/                # WebFlux/Security/JWT/RabbitMQ/Redis/MinIO/Flyway/ReactiveTx 配置
 │   ├── controller/            # REST + SSE Controller
 │   ├── service/               # 业务服务
 │   │   ├── orchestrator/      # M2 TaskOrchestrator
 │   │   ├── sse/               # M3 SseEmitterPool
 │   │   ├── file/              # M4 FileService
-│   │   └── audit/             # M5 AuditLogger
+│   │   └── audit/             # M5 AuditLogger（待实现）
 │   ├── mq/                    # RabbitMQ 生产者 + 消费者
-│   ├── repository/            # R2DBC / JPA Repository
-│   ├── domain/                # Entity / DTO
+│   ├── repository/            # R2DBC Repository
+│   ├── domain/                # 领域对象
+│   │   ├── dto/               # LoginRequest / TokenResponse 等
+│   │   ├── entity/            # Report / Task / TaskStep / UserAccount
+│   │   └── enums/             # TaskStatus / StepStatus / TaskStepName
 │   ├── exception/             # GlobalExceptionHandler + 业务异常
-│   ├── security/              # JWT filter、UserDetailsService
-│   └── util/                  # JWT、Idempotency、RateLimiter
+│   ├── security/              # JWT filter / JwtUtil / UserDetailsService
+│   ├── trace/                 # TraceContext / TraceIdWebFilter
+│   └── util/                  # Idempotency / RateLimiter（待实现）
 ├── src/main/resources/
 │   ├── application.yml
-│   ├── db/migration/          # Flyway V1__init.sql 等
+│   ├── db/migration/          # Flyway V1–V6 迁移
 │   └── static/                # Swagger UI 资源
 └── src/test/                  # JUnit5 + Testcontainers
 ```
@@ -138,19 +142,26 @@ ai-service/
 frontend/
 ├── package.json
 ├── vite.config.ts
+├── tsconfig.json / tsconfig.app.json / tsconfig.node.json
+├── .eslintrc.cjs
 ├── src/
 │   ├── main.ts
 │   ├── App.vue
+│   ├── assets/                # 全局样式
 │   ├── router/                # 路由
 │   ├── stores/                # Pinia
 │   ├── api/                   # axios + SSE client
+│   ├── types/                 # TypeScript 类型定义
 │   ├── views/                 # 页面
 │   │   ├── Login.vue
 │   │   ├── Reports.vue
-│   │   ├── ReportDetail.vue
-│   │   └── Dashboard.vue
+│   │   ├── ReportUpload.vue
+│   │   ├── TaskProgress.vue
+│   │   ├── ReportDetail.vue   # 待实现（M2+）
+│   │   └── Dashboard.vue      # 待实现（M6+）
 │   ├── components/            # 通用组件
 │   └── utils/
+├── nginx.conf
 └── Dockerfile
 ```
 
@@ -158,27 +169,35 @@ frontend/
 
 ```
 scripts/
-├── init_data.py               # 一键初始化（建表、bucket、collection、预置数据）
+├── init_minio.py              # MinIO bucket 初始化
+├── init_milvus.py             # Milvus collection 建立
 ├── declare_mq.py              # 声明 RabbitMQ exchange/queue
-├── build_kb.py                # 离线知识库构建
-├── crawl_cninfo.py            # 爬取巨潮年报
-├── finreport-train            # 训练 CLI 入口
-├── eval_extractor.py
-├── eval_embedder.py
-├── eval_layoutlm.py
-└── eval_e2e.py
+├── download_models.py         # 模型权重下载
+├── download_sample.py         # 样例年报下载
+├── inject_mock_progress.py    # E2E mock 进度注入
+├── e2e_m116.py                # Playwright 浏览器 E2E
+├── init_data.py               # 一键初始化（待实现，将整合上述脚本）
+├── build_kb.py                # 离线知识库构建（待实现，M5）
+├── crawl_cninfo.py            # 爬取巨潮年报（待实现，M4）
+├── finreport-train            # 训练 CLI 入口（待实现，M4）
+├── eval_extractor.py          # T1 评估（待实现，M4）
+├── eval_embedder.py           # T2 评估（待实现，M4）
+└── eval_layoutlm.py           # T3 评估（待实现，M4）
 ```
 
 ### 1.6 deploy/
 
 ```
 deploy/
-├── docker-compose.yml         # 8 services
+├── docker-compose.yml         # 10 个容器定义（9 常驻 + minio-init 退出）
 ├── docker-compose.dev.yml     # 开发覆盖（挂载源码）
-├── prometheus/prometheus.yml
-├── grafana/dashboards/
-├── rabbitmq/definitions.json  # exchange/queue 声明
-└── mysql/init.sql
+├── .env.example               # 环境变量模板
+├── prometheus/prometheus.yml  # M6 待实现
+├── grafana/dashboards/        # M6 待实现
+├── rabbitmq/definitions.json  # exchange/queue 声明（4 exchange + 6 queue）
+├── rabbitmq/rabbitmq.conf     # RabbitMQ 配置
+├── minio/init.sh              # MinIO bucket 初始化（容器启动时执行）
+└── mysql/init.sql             # 数据库初始化
 ```
 
 ---
@@ -189,7 +208,7 @@ deploy/
 
 | 组件 | 版本 |
 |---|---|
-| Java | 17 |
+| Java | 21 |
 | SpringBoot | 3.2.x |
 | Python | 3.11 |
 | PyTorch | 2.3.x + CUDA 12.1 |
@@ -265,6 +284,7 @@ GitHub Actions 三条流水线：
   - `backend/src/main/resources/db/migration/V3__init_task.sql`
   - `backend/src/main/resources/db/migration/V4__init_model_audit.sql`
   - `backend/src/main/resources/db/migration/V5__init_indexes.sql`
+  - `backend/src/main/resources/db/migration/V6__m1_reliability_hardening.sql`（M1 可靠性加固）
 - **依赖**：M1.02
 - **验收标准**：Flyway 启动自动 migrate；表结构与 spec §5.2.2 一致；所有索引就位
 - **验证方式**：`SHOW TABLES;` 返回 12 张表；`DESC financial_statement;` 字段匹配
@@ -304,9 +324,10 @@ GitHub Actions 三条流水线：
 - **涉及文件**：
   - `backend/pom.xml`
   - `backend/src/main/java/com/finreport/FinReportApplication.java`
-  - `backend/src/main/java/com/finreport/config/{WebFluxConfig,SecurityConfig,JwtConfig,RabbitMqConfig,RedisConfig,MinioConfig}.java`
+  - `backend/src/main/java/com/finreport/config/{WebFluxConfig,SecurityConfig,JwtConfig,JwtSecretValidator,RabbitMqConfig,RedisConfig,MinioConfig,FlywayMigrationConfiguration,ReactiveTransactionConfig}.java`
   - `backend/src/main/java/com/finreport/exception/GlobalExceptionHandler.java`
   - `backend/src/main/java/com/finreport/security/{JwtFilter,JwtUtil,UserDetailsServiceImpl}.java`
+  - `backend/src/main/java/com/finreport/trace/{TraceContext,TraceIdWebFilter}.java`
   - `backend/src/main/resources/application.yml`
 - **依赖**：M1.03、M1.04、M1.06
 - **验收标准**：`/api/v1/system/health` 返回 200 + 各组件状态；未带 token 访问受保护接口返回 401
@@ -429,11 +450,13 @@ GitHub Actions 三条流水线：
 
 ### 3.3 M1 阶段验收
 
-- [ ] `docker compose up` 一键启动 8 个 healthy 容器
-- [ ] 上传样例 PDF → 前端 SSE 看到 PARSE/EXTRACT/CHECK/REPORT 四阶段进度
-- [ ] MySQL 中存在 task + task_step 记录
-- [ ] MinIO 中存在原始 PDF
-- [ ] CI 三条流水线全绿
+- [x] `docker compose up` 一键启动 9 个 healthy 容器（含 etcd）+ minio-init
+- [x] 上传样例 PDF → 前端 SSE 看到 PARSE/EXTRACT/CHECK/REPORT 四阶段进度
+- [x] MySQL 中存在 task + task_step 记录
+- [x] MinIO 中存在原始 PDF
+- [x] CI 三条流水线全绿（Backend CI / AI Service CI / Frontend CI）
+
+> **M1 状态：✅ 已完成**（2026-07-19）。17 个任务全部完成。详见 [进度记录](../../progress/m1.md) 和 [决策记录](../../decisions/)。
 
 ---
 
