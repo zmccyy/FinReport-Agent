@@ -58,12 +58,26 @@ class SseParser {
     this.buffer += chunk
     const events: Array<{ event: string; data: string; id?: string }> = []
     for (;;) {
-      const match = this.buffer.match(/\r\n|\r|\n/)
-      if (!match || match.index === undefined) break
-      const line = this.buffer.slice(0, match.index)
-      this.buffer = this.buffer.slice(match.index + match[0].length)
-      const parsed = this.processLine(line)
-      if (parsed) events.push(parsed)
+      // 优先匹配 \n（覆盖 LF 和 CRLF）
+      const lfIdx = this.buffer.indexOf('\n')
+      if (lfIdx >= 0) {
+        const lineEnd = lfIdx > 0 && this.buffer[lfIdx - 1] === '\r' ? lfIdx - 1 : lfIdx
+        const line = this.buffer.slice(0, lineEnd)
+        this.buffer = this.buffer.slice(lfIdx + 1)
+        const parsed = this.processLine(line)
+        if (parsed) events.push(parsed)
+        continue
+      }
+      // 无 \n：检查孤 \r（仅当后面有非 \n 字符，否则可能是跨 chunk CRLF）
+      const crIdx = this.buffer.indexOf('\r')
+      if (crIdx >= 0 && crIdx < this.buffer.length - 1) {
+        const line = this.buffer.slice(0, crIdx)
+        this.buffer = this.buffer.slice(crIdx + 1)
+        const parsed = this.processLine(line)
+        if (parsed) events.push(parsed)
+        continue
+      }
+      break // \r 在缓冲区末尾 → 延后，下个 chunk 判断是 CRLF 还是孤 \r
     }
     return events
   }
@@ -181,13 +195,18 @@ export function connectTaskStream(
       return
     }
 
+    // 永久性 4xx（非 401）立即停止，不重试也不标记失败
+    if (response.status !== 401 && response.status >= 400 && response.status < 500) {
+      terminal = true
+      return
+    }
+
     if (!response.ok || !response.body) {
       scheduleReconnect()
       return
     }
 
-    // 连接成功
-    attempts = 0
+    // 连接成功 — 退避计数器由 handleOpen 内重置（读取事件后），防止 accept-then-drop 重置循环
     retriedAfterRefresh = false
     handlers.onOpen?.()
 

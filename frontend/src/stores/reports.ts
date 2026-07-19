@@ -1,5 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { defineStore } from 'pinia'
+import { getAccessToken } from '@/api/token'
 
 /**
  * 已上传财报记录 store（localStorage 持久化）。
@@ -7,6 +8,8 @@ import { defineStore } from 'pinia'
  * ⚠️ M1 过渡方案：后端尚未提供 GET /reports 列表接口（M2+ 才补齐），
  * 因此前端把本用户上传的记录持久化在 localStorage，用于列表展示与
  * 重新进入进度页（演示 SSE 断线重连）。待列表接口上线后应改为后端拉取。
+ *
+ * key 按 userId 命名空间隔离，切换账户不泄露记录。
  */
 
 export interface TrackedReport {
@@ -22,11 +25,18 @@ export interface TrackedReport {
   status: string
 }
 
-const STORAGE_KEY = 'fin:tracked_reports'
+const STORAGE_PREFIX = 'fin:tracked_reports:'
+
+function storageKey(): string {
+  // 以 access token 前 8 位命名空间隔离用户（登出后 token 被清，自然切换）
+  const token = getAccessToken()
+  const scope = token ? token.slice(0, 8) : 'anon'
+  return STORAGE_PREFIX + scope
+}
 
 function load(): TrackedReport[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(storageKey())
     if (!raw) return []
     const parsed = JSON.parse(raw)
     return Array.isArray(parsed) ? (parsed as TrackedReport[]) : []
@@ -38,14 +48,22 @@ function load(): TrackedReport[] {
 export const useReportsStore = defineStore('reports', () => {
   const reports = ref<TrackedReport[]>(load())
 
+  let currentStorageKey = storageKey()
+
   // 任何变更自动持久化
   watch(
     reports,
     (val) => {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(val))
+      localStorage.setItem(currentStorageKey, JSON.stringify(val))
     },
     { deep: true }
   )
+
+  /** 刷新存储键（登出后 token 变化或重新登录时调用以重新加载）。 */
+  function reload(): void {
+    currentStorageKey = storageKey()
+    reports.value = load()
+  }
 
   /** 按上传时间倒序 */
   const sorted = computed(() =>
@@ -72,5 +90,5 @@ export const useReportsStore = defineStore('reports', () => {
     reports.value = reports.value.filter((r) => r.taskId !== taskId)
   }
 
-  return { reports, sorted, upsert, updateStatus, remove }
+  return { reports, sorted, upsert, updateStatus, remove, reload }
 })

@@ -56,6 +56,7 @@ function switchMode(next: Mode): void {
 }
 
 async function submit(): Promise<void> {
+  if (loading.value) return
   if (!formRef.value) return
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
@@ -161,7 +162,6 @@ async function submit(): Promise<void> {
               :prefix-icon="'Lock'"
               autocomplete="new-password"
               show-password
-              @keyup.enter="submit"
             />
           </el-form-item>
 
@@ -170,7 +170,6 @@ async function submit(): Promise<void> {
             class="panel__submit"
             :loading="loading"
             native-type="submit"
-            @click="submit"
           >
             {{ mode === 'login' ? '登 录' : '注册并登录' }}
           </el-button>

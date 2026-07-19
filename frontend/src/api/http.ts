@@ -3,6 +3,11 @@ import { ApiError, toApiError } from './errors'
 import { clearTokens, getAccessToken, getRefreshToken, setTokens } from './token'
 import type { TokenResponse } from '@/types'
 
+/** mergeConfig 保留这些属性的值，故可跨越 retry 轮次标记已重试 */
+interface RetriedConfig extends InternalAxiosRequestConfig {
+  _finRetried?: true
+}
+
 /**
  * Axios 实例。
  *
@@ -38,8 +43,12 @@ async function doRefresh(): Promise<string | null> {
     const resp = await axios.post<TokenResponse>(`${baseURL}/auth/refresh`, { refreshToken })
     setTokens(resp.data.accessToken, resp.data.refreshToken)
     return resp.data.accessToken
-  } catch {
-    clearTokens()
+  } catch (err) {
+    // 仅服务端 4xx 明确宣示 refresh token 失效时才清空;
+    // 瞬时网络错误保留 token，由调用方决定退避（sse）还是放弃（http）
+    if (err instanceof AxiosError && err.response && err.response.status < 500) {
+      clearTokens()
+    }
     return null
   }
 }
@@ -61,9 +70,6 @@ export function refreshAccessToken(): Promise<string | null> {
   return singleFlightRefresh()
 }
 
-// 已重试过的请求（防止刷新后重试再 401 导致无限循环）
-const retriedRequests = new WeakSet<InternalAxiosRequestConfig>()
-
 http.interceptors.request.use((config) => {
   config.headers.set('X-Trace-Id', newTraceId())
   const token = getAccessToken()
@@ -76,12 +82,13 @@ http.interceptors.request.use((config) => {
 http.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    const original = error.config
+    const original = error.config as RetriedConfig | undefined
     const status = error.response?.status ?? 0
     const isAuthEndpoint = original?.url?.includes('/auth/') ?? false
 
-    if (status === 401 && original && !isAuthEndpoint && !retriedRequests.has(original)) {
-      retriedRequests.add(original)
+    // _finRetried 标签在 mergeConfig 中保留（custom own-property），WeakSet 按对象身份是 dead code
+    if (status === 401 && original && !isAuthEndpoint && !original._finRetried) {
+      original._finRetried = true
       const newToken = await singleFlightRefresh()
       if (newToken) {
         original.headers.set('Authorization', `Bearer ${newToken}`)
@@ -94,17 +101,15 @@ http.interceptors.response.use(
       redirectToLogin()
     }
 
-    // 网络错误（无响应体）与 RFC 9457 错误统一转 ApiError
+    // 映射常见 Axios 错误码为更精确的 ApiError 文案
     if (error.response) {
       return Promise.reject(toApiError(error.response.data, status))
     }
-    return Promise.reject(
-      new ApiError({
-        status: 0,
-        code: 'NETWORK_ERROR',
-        message: '网络异常，请检查后端服务是否可达',
-      })
-    )
+    const code = error.code === 'ECONNABORTED' ? 'TIMEOUT' : 'NETWORK_ERROR'
+    const msg = error.code === 'ECONNABORTED'
+      ? '请求超时，请检查文件大小或网络速度'
+      : '网络异常，请检查后端服务是否可达'
+    return Promise.reject(new ApiError({ status: 0, code, message: msg }))
   }
 )
 

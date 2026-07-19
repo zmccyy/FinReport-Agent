@@ -34,6 +34,8 @@ export const useTaskStore = defineStore('task', () => {
   const errorMessage = ref<string | null>(null)
   /** SSE 是否已建立（用于连接状态提示） */
   const connected = ref(false)
+  /** SSE 连接已断开且重连耗尽（连接 ≠ 任务状态） */
+  const disconnected = ref(false)
 
   const stages = reactive<Record<StageKey, StageStatus>>(freshStages())
   /** EXTRACT 三表子步骤状态（EXTRACT_BS/IS/CF），用于展开展示 */
@@ -63,12 +65,10 @@ export const useTaskStore = defineStore('task', () => {
       onReconnecting: () => {
         connected.value = false
       },
-      onGiveUp: (reason) => {
+      onGiveUp: (_reason) => {
         connected.value = false
-        if (!isTerminal.value) {
-          taskStatus.value = 'FAILED'
-          errorMessage.value = reason
-        }
+        // 连接中断 ≠ 任务失败；保留后端真实状态不变，仅标记已断开
+        disconnected.value = true
       },
     })
   }
@@ -80,13 +80,27 @@ export const useTaskStore = defineStore('task', () => {
     const stage = stepToStage(e.step)
 
     if (e.status === 'SUCCESS') {
-      stages[stage] = 'success'
-      activateNext(stage)
+      // EXTRACT 阶段需三表全部成功才标记完成（CR review finding #3）
+      if (stage === 'EXTRACT') {
+        extractSteps[e.step] = 'success'
+        const allDone = ['EXTRACT_BS', 'EXTRACT_IS', 'EXTRACT_CF'].every(
+          (s) => extractSteps[s] === 'success'
+        )
+        if (allDone) {
+          stages.EXTRACT = 'success'
+          activateNext('EXTRACT')
+        } else {
+          if (stages[stage] === 'pending') stages[stage] = 'active'
+        }
+      } else {
+        stages[stage] = 'success'
+        activateNext(stage)
+      }
       taskStatus.value = 'RUNNING'
     } else if (e.status === 'FAILED') {
       stages[stage] = 'failed'
-      taskStatus.value = 'FAILED'
-      errorMessage.value = (e.result?.error as string) ?? `阶段 ${stage} 失败`
+      // 步骤 FAILED ≠ 任务终态；后端最多重试 3 次后才发 done(FAILED) / error 事件
+      // 只标记该阶段为失败，不提前设置 taskStatus
     } else {
       // RUNNING / RETRY 等中间态
       if (stages[stage] === 'pending') stages[stage] = 'active'
@@ -137,6 +151,8 @@ export const useTaskStore = defineStore('task', () => {
     overallProgress.value = 0
     taskStatus.value = 'PENDING'
     errorMessage.value = null
+    connected.value = false
+    disconnected.value = false
     Object.assign(stages, freshStages())
     for (const k of Object.keys(extractSteps)) delete extractSteps[k]
   }
@@ -148,6 +164,7 @@ export const useTaskStore = defineStore('task', () => {
     taskStatus,
     errorMessage,
     connected,
+    disconnected,
     stages,
     extractSteps,
     isTerminal,

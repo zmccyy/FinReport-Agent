@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import * as authApi from '@/api/auth'
 import { clearTokens, getRefreshToken, hasToken, setTokens } from '@/api/token'
 import type { UserInfo } from '@/types'
+import { useReportsStore } from './reports'
 
 /**
  * 认证状态 store。
@@ -29,6 +30,7 @@ export const useAuthStore = defineStore('auth', () => {
     setTokens(tokens.accessToken, tokens.refreshToken)
     syncAuthState()
     await fetchCurrentUser()
+    useReportsStore().reload()
   }
 
   /** 注册（注册即登录）并拉取用户信息。 */
@@ -37,6 +39,7 @@ export const useAuthStore = defineStore('auth', () => {
     setTokens(tokens.accessToken, tokens.refreshToken)
     syncAuthState()
     await fetchCurrentUser()
+    useReportsStore().reload()
   }
 
   /** 拉取当前用户信息。 */
@@ -46,16 +49,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   /**
    * 应用启动时恢复会话：本地有 token 则尝试拉取用户。
-   * token 失效时由 http 拦截器统一处理 401（清 token + 跳登录）。
+   * 拉取不回退（不阻塞首屏）；token 失效时由 http 拦截器统一处理 401。
    */
-  async function restore(): Promise<void> {
+  function restore(): void {
     syncAuthState()
     if (authenticated.value && !user.value) {
-      try {
-        await fetchCurrentUser()
-      } catch {
-        // 忽略：交给拦截器/后续请求触发登录跳转
-      }
+      // 非阻塞：fire-and-forget，token 有效性由后续 API 调用的拦截器校验
+      void fetchCurrentUser().catch(() => syncAuthState())
     }
     restored.value = true
   }
@@ -72,6 +72,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
     clearTokens()
     syncAuthState()
+    useReportsStore().reload()
     user.value = null
   }
 
