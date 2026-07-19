@@ -1,35 +1,49 @@
-"""
-FinReport Agent — L3 AI 服务层入口。
-
-FastAPI 应用，提供文档解析、科目抽取、勾稽核对、报告生成、
-Agent 问答等 AI 能力的 HTTP + MQ 接口。
-"""
+"""FinReport AI service FastAPI application."""
 
 from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from fastapi import FastAPI
 
 from app.api.health import router as health_router
+from app.api.parse import router as parse_router
+from app.core.config import Settings
+from app.mq.consumer import TaskConsumer
+from app.mq.producer import ProgressProducer
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """应用生命周期管理。
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Create a configured FastAPI application instance.
 
-    启动时初始化核心组件，关闭时清理资源。
-    M1.13 前为占位实现。
+    Args:
+        settings: Optional settings override for tests.
+
+    Returns:
+        Configured ASGI application.
     """
-    # TODO: M1.13 — 初始化 ModelHub、MQ consumer、Redis 连接池
-    yield
-    # TODO: M1.13 — 关闭 MQ 连接、释放模型
+    runtime_settings = settings or Settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        """Start and stop the M1 RabbitMQ worker with the web application."""
+        producer = ProgressProducer(runtime_settings)
+        consumer = TaskConsumer(runtime_settings, producer)
+        app.state.task_consumer = consumer
+        consumer.start()
+        try:
+            yield
+        finally:
+            consumer.stop()
+
+    application = FastAPI(
+        title="FinReport AI Service",
+        description="A 股上市公司财报深度解析 Agent — L3 AI 服务层",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
+    application.include_router(health_router)
+    application.include_router(parse_router)
+    return application
 
 
-app = FastAPI(
-    title="FinReport AI Service",
-    description="A 股上市公司财报深度解析 Agent — L3 AI 服务层",
-    version="0.1.0",
-    lifespan=lifespan,
-)
-
-# 注册路由
-app.include_router(health_router)
+app = create_app()
