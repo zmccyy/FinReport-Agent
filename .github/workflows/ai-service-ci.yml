@@ -40,7 +40,9 @@ jobs:
           black --check app/ tests/
 
       - name: Run unit tests with coverage report
-        run: pytest tests/ -v --cov=app --cov-fail-under=80
+        env:
+          PYTHONPATH: ${{ github.workspace }}/ai-service
+        run: python -m pytest tests/ -v --cov=app --cov-fail-under=80
 
       - name: Run M1 mock service dry run
         env:
