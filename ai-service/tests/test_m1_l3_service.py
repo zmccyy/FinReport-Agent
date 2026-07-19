@@ -61,6 +61,15 @@ class FakeProducer:
         self.messages.append((message, trace_id))
 
 
+class FailingProducer(FakeProducer):
+    """Simulates a publisher whose broker confirmation is unavailable."""
+
+    def publish_progress(self, message: dict[str, Any], trace_id: str) -> None:
+        """Reject a progress publish after the worker has completed its handler."""
+        del message, trace_id
+        raise OSError("progress publisher confirmation failed")
+
+
 def build_message(step: str = "parse") -> bytes:
     """Build a valid task message body."""
     return json.dumps(
@@ -112,8 +121,8 @@ def test_task_consumer_acknowledges_after_success_and_preserves_trace_id() -> No
     assert progress["idempotencyKey"] == "task-123:PARSE"
 
 
-def test_task_consumer_nacks_failed_handler_without_requeue() -> None:
-    """A handler failure must route to the DLQ instead of requeueing indefinitely."""
+def test_task_consumer_reports_handler_failure_before_acknowledging_delivery() -> None:
+    """A handler failure must report FAILED progress before the delivery is acknowledged."""
     producer = FakeProducer()
     consumer = TaskConsumer(Settings(mq_consumer_enabled=False), producer)
     channel = FakeChannel()
@@ -131,9 +140,37 @@ def test_task_consumer_nacks_failed_handler_without_requeue() -> None:
         build_message(),
     )
 
+    assert channel.acks == [18]
+    assert channel.nacks == []
+    assert producer.messages == [
+        (
+            {
+                "taskId": "task-123",
+                "step": "PARSE",
+                "status": "FAILED",
+                "progress": 15,
+                "result": {"error": "mock handler failed"},
+                "idempotencyKey": "task-123:PARSE",
+            },
+            "trace-def",
+        )
+    ]
+
+
+def test_task_consumer_nacks_when_progress_publication_is_unconfirmed() -> None:
+    """An unconfirmed progress publish must keep the source task out of false success."""
+    consumer = TaskConsumer(Settings(mq_consumer_enabled=False), FailingProducer())
+    channel = FakeChannel()
+
+    consumer.on_message(
+        channel,
+        FakeMethod(delivery_tag=19, routing_key="parse"),
+        FakeProperties({"traceId": "trace-publish-failure"}),
+        build_message(),
+    )
+
     assert channel.acks == []
-    assert channel.nacks == [(18, False)]
-    assert producer.messages == []
+    assert channel.nacks == [(19, False)]
 
 
 def test_task_consumer_declares_prefetch_count_one() -> None:

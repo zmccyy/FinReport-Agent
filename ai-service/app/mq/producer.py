@@ -42,6 +42,7 @@ class ProgressProducer:
         )
         self.connection = pika.BlockingConnection(parameters)
         self.channel = self.connection.channel()
+        self.channel.confirm_delivery()
 
     def publish_progress(self, message: dict[str, Any], trace_id: str) -> None:
         """Publish a persistent progress message with trace and idempotency headers.
@@ -87,12 +88,17 @@ class ProgressProducer:
         self.connect()
         if self.channel is None:
             raise RuntimeError("RabbitMQ channel is unavailable")
-        self.channel.basic_publish(
+        import pika
+
+        confirmed = self.channel.basic_publish(
             exchange=PROGRESS_EXCHANGE,
             routing_key="",
             body=json.dumps(body).encode("utf-8"),
             properties=properties,
+            mandatory=True,
         )
+        if confirmed is False:
+            raise pika.exceptions.NackError([])
 
     def _reset_connection(self) -> None:
         """Discard a broken connection so the next publish opens a fresh channel."""

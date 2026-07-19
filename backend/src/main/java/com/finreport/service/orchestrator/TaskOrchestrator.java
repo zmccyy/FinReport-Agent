@@ -472,9 +472,9 @@ public class TaskOrchestrator {
                         "TASK_STEP_NOT_FOUND", "任务步骤不存在: " + stepName)))
                 .flatMap(step -> {
                     if (StepStatus.SUCCESS.name().equals(step.getStatus())) {
-                        log.debug("[TaskOrchestrator] 重复成功进度，跳过后续编排 taskId={} step={}",
+                        log.warn("[TaskOrchestrator] 重放成功进度，补偿检查后续编排 taskId={} step={}",
                                 taskId, stepName);
-                        return Mono.just(task);
+                        return reconcileSuccessfulStep(task, stepName, taskId);
                     }
                     step.setStatus(StepStatus.SUCCESS.name());
                     step.setFinishedAt(LocalDateTime.now());
@@ -493,6 +493,49 @@ public class TaskOrchestrator {
                 });
     }
 
+    /**
+     * Reconcile downstream dispatch after a redelivered successful progress event.
+     *
+     * <p>A process crash can occur after the current step reaches SUCCESS but before its
+     * downstream message is published. Replaying the stable idempotency key therefore repairs
+     * missing PENDING steps instead of silently returning and leaving the task stalled.</p>
+     */
+    private Mono<Task> reconcileSuccessfulStep(Task task, String stepName, String taskId) {
+        TaskStatus current = TaskStatus.valueOf(task.getStatus());
+        return switch (stepName) {
+            case "PARSE" -> current == TaskStatus.PARSE_SUCCESS || current == TaskStatus.EXTRACT_RUNNING
+                    ? dispatchExtractionSteps(task, buildPayload(task))
+                    : Mono.just(task);
+            case "EXTRACT_BS", "EXTRACT_IS", "EXTRACT_CF" ->
+                    reconcileExtractSuccess(task, taskId, current);
+            case "CHECK" -> current == TaskStatus.CHECK_RUNNING || current == TaskStatus.CHECK_SUCCESS
+                    ? handleNonExtractStepSuccess(task, stepName, taskId)
+                    : Mono.just(task);
+            case "REPORT" -> current == TaskStatus.REPORT_RUNNING || current == TaskStatus.REPORT_SUCCESS
+                    ? handleNonExtractStepSuccess(task, stepName, taskId)
+                    : Mono.just(task);
+            default -> Mono.just(task);
+        };
+    }
+
+    private Mono<Task> reconcileExtractSuccess(Task task, String taskId, TaskStatus current) {
+        if (current != TaskStatus.EXTRACT_RUNNING
+                && current != TaskStatus.EXTRACT_PARTIAL
+                && current != TaskStatus.EXTRACT_SUCCESS) {
+            return Mono.just(task);
+        }
+        return checkAllExtractsDone(taskId)
+                .flatMap(allDone -> {
+                    if (!Boolean.TRUE.equals(allDone)) {
+                        return Mono.just(task);
+                    }
+                    if (current == TaskStatus.EXTRACT_SUCCESS) {
+                        return dispatchStepIfPending(task, TaskStepName.CHECK, buildPayload(task));
+                    }
+                    return handleExtractStepSuccess(task, taskId);
+                });
+    }
+
     private Mono<Task> handleExtractStepSuccess(Task updatedTask, String taskId) {
         return checkAllExtractsDone(taskId)
                 .flatMap(allDone -> {
@@ -500,9 +543,8 @@ public class TaskOrchestrator {
                         updatedTask.setStatus(TaskStatus.EXTRACT_SUCCESS.name());
                         updatedTask.setProgress(PROGRESS_EXTRACT);
                         return taskRepo.save(updatedTask)
-                                .flatMap(saved ->
-                                        dispatchStep(taskId, TaskStepName.CHECK,
-                                                buildPayload(saved)));
+                                .flatMap(saved -> dispatchStepIfPending(
+                                        saved, TaskStepName.CHECK, buildPayload(saved)));
                     } else {
                         updatedTask.setStatus(TaskStatus.EXTRACT_PARTIAL.name());
                         return taskRepo.save(updatedTask);
@@ -528,12 +570,29 @@ public class TaskOrchestrator {
                     }
                     String next = stateMachine.nextStepAfter(stepName);
                     if (next != null) {
-                        return dispatchStep(taskId,
+                        return dispatchStepIfPending(saved,
                                 TaskStepName.valueOf(next),
                                 buildPayload(saved));
                     }
                     return Mono.just(saved);
                 });
+    }
+
+    /**
+     * Dispatch a downstream step only when its progress has not already been scheduled.
+     *
+     * <p>This makes a replayed upstream SUCCESS safe when the original downstream publish
+     * already completed.</p>
+     */
+    private Mono<Task> dispatchStepIfPending(
+            Task task, TaskStepName step, Map<String, Object> payload) {
+        return stepRepo.findByTaskIdAndStepName(task.getId(), step.name())
+                .switchIfEmpty(Mono.error(new BusinessException(
+                        org.springframework.http.HttpStatus.NOT_FOUND,
+                        "TASK_STEP_NOT_FOUND", "任务步骤不存在: " + step.name())))
+                .flatMap(stepRecord -> StepStatus.PENDING.name().equals(stepRecord.getStatus())
+                        ? dispatchStep(task.getId(), step, payload)
+                        : Mono.just(task));
     }
 
     /**
@@ -545,6 +604,9 @@ public class TaskOrchestrator {
      */
     private Mono<Task> dispatchExtractionSteps(Task task, Map<String, Object> payload) {
         TaskStatus current = TaskStatus.valueOf(task.getStatus());
+        if (current == TaskStatus.EXTRACT_RUNNING) {
+            return publishPendingExtractionSteps(task, payload).thenReturn(task);
+        }
         if (!stateMachine.canTransition(current, TaskStatus.EXTRACT_RUNNING)) {
             return Mono.error(new BusinessException(
                     org.springframework.http.HttpStatus.CONFLICT,
@@ -555,9 +617,13 @@ public class TaskOrchestrator {
         task.setStatus(TaskStatus.EXTRACT_RUNNING.name());
         task.setCurrentStep(TaskStepName.EXTRACT_BS.name());
         return taskRepo.save(task)
-                .flatMap(saved -> Flux.fromIterable(EXTRACTION_STEPS)
-                        .concatMap(step -> markExtractionStepRunningAndPublish(saved, step, payload))
-                        .then(Mono.just(saved)));
+                .flatMap(saved -> publishPendingExtractionSteps(saved, payload).thenReturn(saved));
+    }
+
+    private Mono<Void> publishPendingExtractionSteps(Task task, Map<String, Object> payload) {
+        return Flux.fromIterable(EXTRACTION_STEPS)
+                .concatMap(step -> markExtractionStepRunningAndPublish(task, step, payload))
+                .then();
     }
 
     /**
@@ -570,6 +636,9 @@ public class TaskOrchestrator {
                         org.springframework.http.HttpStatus.NOT_FOUND,
                         "TASK_STEP_NOT_FOUND", "任务步骤不存在: " + step.name())))
                 .flatMap(stepRecord -> {
+                    if (!StepStatus.PENDING.name().equals(stepRecord.getStatus())) {
+                        return Mono.empty();
+                    }
                     stepRecord.setStatus(StepStatus.RUNNING.name());
                     stepRecord.setStartedAt(LocalDateTime.now());
                     return stepRepo.save(stepRecord)

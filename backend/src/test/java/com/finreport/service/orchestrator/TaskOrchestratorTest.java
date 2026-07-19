@@ -319,24 +319,59 @@ class TaskOrchestratorTest {
         }
 
         @Test
-        @DisplayName("should ignore duplicate successful progress without dispatching the next step")
-        void shouldIgnoreDuplicateSuccessfulProgressWithoutDispatchingNextStep() {
-            Task task = new Task();
-            task.setId("task-duplicate-success");
-            task.setStatus(TaskStatus.PARSE_SUCCESS.name());
-            TaskStep step = new TaskStep();
-            step.setTaskId(task.getId());
-            step.setStepName("PARSE");
-            step.setStatus(StepStatus.SUCCESS.name());
+        @DisplayName("should reconcile a replayed PARSE success by dispatching missing extraction steps")
+        void shouldReconcileReplayedParseSuccessByDispatchingMissingExtractionSteps() {
+            Task task = Task.builder()
+                    .id("task-duplicate-success")
+                    .status(TaskStatus.PARSE_SUCCESS.name())
+                    .payload("{\"pdfObjectKey\":\"uploads/replay.pdf\"}")
+                    .build();
+            TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
+                    .status(StepStatus.SUCCESS.name()).build();
+            TaskStep balanceSheet = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
+                    .status(StepStatus.PENDING.name()).build();
+            TaskStep incomeStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_IS")
+                    .status(StepStatus.PENDING.name()).build();
+            TaskStep cashFlowStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_CF")
+                    .status(StepStatus.PENDING.name()).build();
 
             when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
-            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(step));
+            when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(balanceSheet));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS")).thenReturn(Mono.just(incomeStatement));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_CF")).thenReturn(Mono.just(cashFlowStatement));
 
             StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of()))
-                    .expectNext(task)
+                    .assertNext(saved -> assertEquals(TaskStatus.EXTRACT_RUNNING.name(), saved.getStatus()))
                     .verifyComplete();
 
-            verify(stepRepo, never()).save(any(TaskStep.class));
+            assertEquals(StepStatus.RUNNING.name(), balanceSheet.getStatus());
+            assertEquals(StepStatus.RUNNING.name(), incomeStatement.getStatus());
+            assertEquals(StepStatus.RUNNING.name(), cashFlowStatement.getStatus());
+            verify(messageProducer).publishTaskStep(
+                    task.getId(), "extract.bs", Map.of("pdfObjectKey", "uploads/replay.pdf"), "");
+            verify(messageProducer).publishTaskStep(
+                    task.getId(), "extract.is", Map.of("pdfObjectKey", "uploads/replay.pdf"), "");
+            verify(messageProducer).publishTaskStep(
+                    task.getId(), "extract.cf", Map.of("pdfObjectKey", "uploads/replay.pdf"), "");
+        }
+
+        @Test
+        @DisplayName("should not rewind a later task phase when an extraction success is replayed")
+        void shouldNotRewindLaterTaskPhaseWhenExtractionSuccessIsReplayed() {
+            Task task = Task.builder().id("task-later-phase").status(TaskStatus.CHECK_RUNNING.name()).build();
+            TaskStep balanceSheet = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
+                    .status(StepStatus.SUCCESS.name()).build();
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(balanceSheet));
+
+            StepVerifier.create(orchestrator.handleStepProgress(
+                            task.getId(), "EXTRACT_BS", "SUCCESS", Map.of()))
+                    .assertNext(saved -> assertEquals(TaskStatus.CHECK_RUNNING.name(), saved.getStatus()))
+                    .verifyComplete();
+
             verify(taskRepo, never()).save(any(Task.class));
             verify(messageProducer, never()).publishTaskStep(anyString(), anyString(), any(Map.class), anyString());
         }

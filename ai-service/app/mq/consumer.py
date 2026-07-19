@@ -115,7 +115,11 @@ class TaskConsumer:
     def on_message(
         self, channel: Any, method: Any, properties: Any, body: bytes
     ) -> None:
-        """Process one delivery; success ack, all failures nack to the configured DLQ.
+        """Process one delivery and acknowledge it only after its terminal progress is durable.
+
+        Malformed deliveries cannot be correlated safely and therefore go directly to the DLQ.
+        Handler failures are correlated task failures: they first publish a durable ``FAILED``
+        progress event so L2 can retry or terminally fail the task, then acknowledge the input.
 
         Args:
             channel: Pika channel used for acknowledgement.
@@ -123,6 +127,7 @@ class TaskConsumer:
             properties: AMQP properties containing traceId.
             body: Serialized task JSON.
         """
+        trace_id = str((getattr(properties, "headers", None) or {}).get("traceId", ""))
         try:
             task = TaskMessage.model_validate_json(body)
             handler = self.handlers.get(method.routing_key)
@@ -130,24 +135,73 @@ class TaskConsumer:
                 raise ValueError(f"Unsupported routing key: {method.routing_key}")
             if task.step != method.routing_key:
                 raise ValueError("Message step does not match delivery routing key")
-            result = asyncio.run(handler(task))
             step_name = STEP_NAMES[task.step]
-            trace_id = str((properties.headers or {}).get("traceId", ""))
-            self.producer.publish_progress(
-                {
-                    "taskId": task.task_id,
-                    "step": step_name,
-                    "status": "SUCCESS",
-                    "progress": STEP_PROGRESS[step_name],
-                    "result": result,
-                    "idempotencyKey": f"{task.task_id}:{step_name}",
-                },
-                trace_id,
-            )
-            channel.basic_ack(delivery_tag=method.delivery_tag)
         except Exception:
-            LOGGER.exception("Task processing failed routingKey=%s", method.routing_key)
+            LOGGER.exception("Invalid task delivery routingKey=%s", method.routing_key)
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            return
+
+        try:
+            result = asyncio.run(handler(task))
+        except Exception as error:
+            LOGGER.exception("Task handler failed routingKey=%s", method.routing_key)
+            try:
+                self._publish_progress(
+                    task,
+                    step_name,
+                    "FAILED",
+                    {"error": str(error)},
+                    trace_id,
+                )
+            except Exception:
+                LOGGER.exception(
+                    "Failed to publish task failure progress routingKey=%s",
+                    method.routing_key,
+                )
+                channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                return
+            channel.basic_ack(delivery_tag=method.delivery_tag)
+            return
+
+        try:
+            self._publish_progress(task, step_name, "SUCCESS", result, trace_id)
+        except Exception:
+            LOGGER.exception(
+                "Failed to publish task success progress routingKey=%s",
+                method.routing_key,
+            )
+            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            return
+        channel.basic_ack(delivery_tag=method.delivery_tag)
+
+    def _publish_progress(
+        self,
+        task: TaskMessage,
+        step_name: str,
+        status: str,
+        result: dict[str, Any],
+        trace_id: str,
+    ) -> None:
+        """Publish one terminal step progress event through the confirmed producer.
+
+        Args:
+            task: Validated input task.
+            step_name: L2 step name corresponding to the routing key.
+            status: Terminal step status, either ``SUCCESS`` or ``FAILED``.
+            result: Handler result or failure details.
+            trace_id: Correlation identifier propagated from the input delivery.
+        """
+        self.producer.publish_progress(
+            {
+                "taskId": task.task_id,
+                "step": step_name,
+                "status": status,
+                "progress": STEP_PROGRESS[step_name],
+                "result": result,
+                "idempotencyKey": f"{task.task_id}:{step_name}",
+            },
+            trace_id,
+        )
 
     def stop(self) -> None:
         """Stop consumption and close broker connections."""
