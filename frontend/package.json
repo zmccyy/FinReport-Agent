@@ -9,7 +9,7 @@
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext .vue,.js,.ts",
-    "type-check": "vue-tsc --noEmit"
+    "type-check": "vue-tsc -b --force"
   },
   "dependencies": {
     "vue": "^3.4.38",
