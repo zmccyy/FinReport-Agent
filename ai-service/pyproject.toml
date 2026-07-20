@@ -25,6 +25,9 @@ prod = [
     "pymilvus>=2.4",         # Milvus client
     "minio>=7.2",            # MinIO client
     "pymupdf>=1.24",         # PDF 解析
+    "paddlepaddle>=2.6",    # PaddleOCR 推理后端（CPU 版；GPU 见 spec §4.7）
+    "paddleocr>=2.7",        # PP-Structure 表格还原 + PaddleOCR 兜底
+    "python-multipart>=0.0.6",  # /parse/upload 端点
     "httpx>=0.27",           # Async HTTP client
 ]
 dev = [
