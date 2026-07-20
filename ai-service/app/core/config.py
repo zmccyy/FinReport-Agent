@@ -18,3 +18,7 @@ class Settings(BaseSettings):
     rabbitmq_heartbeat: int = 30
     rabbitmq_reconnect_delay_seconds: float = 1.0
     log_level: str = "INFO"
+    minio_endpoint: str = "http://localhost:9000"
+    minio_access_key: str = "minioadmin"
+    minio_secret_key: str = "minioadmin"
+    minio_upload_bucket: str = "finreport-uploads"

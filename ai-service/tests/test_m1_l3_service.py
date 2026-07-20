@@ -10,7 +10,10 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.main import create_app
+from app.modules.parser.document_parser import DocumentParser
+from app.modules.parser.handler import configure_handler, reset_handler
 from app.mq.consumer import TaskConsumer
+from app.schemas.document import Document, Page
 from app.schemas.task import TaskMessage
 
 
@@ -61,6 +64,42 @@ class FakeProducer:
         self.messages.append((message, trace_id))
 
 
+class _InlineObjectStore:
+    """Minimal MinIO stub for M1 MQ contract tests."""
+
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+
+    def fetch_bytes(self, object_key: str, bucket: str | None = None) -> bytes:
+        """Return the configured PDF bytes."""
+        del object_key, bucket
+        return self.data
+
+
+class _InlineParser(DocumentParser):
+    """Return a deterministic Document without touching PyMuPDF."""
+
+    def parse_bytes(self, pdf_bytes: bytes, source: str) -> Document:
+        """Build a two-page document for the MQ success contract."""
+        del pdf_bytes
+        return Document(
+            source=source,
+            page_count=2,
+            pages=[
+                Page(page_index=0, width=595, height=842),
+                Page(page_index=1, width=595, height=842),
+            ],
+        )
+
+
+@pytest.fixture(autouse=True)
+def _reset_parse_handler_dependencies() -> None:
+    """Keep M1 MQ tests isolated from handler singleton state."""
+    reset_handler()
+    yield
+    reset_handler()
+
+
 class FailingProducer(FakeProducer):
     """Simulates a publisher whose broker confirmation is unavailable."""
 
@@ -98,8 +137,14 @@ def test_health_and_parse_mock_endpoints_are_available() -> None:
     assert docs.status_code == 200
 
 
-def test_task_consumer_acknowledges_after_success_and_preserves_trace_id() -> None:
+def test_task_consumer_acknowledges_after_success_and_preserves_trace_id(
+    text_pdf_bytes: bytes,
+) -> None:
     """A successful mock step reports progress then manually acknowledges delivery."""
+    configure_handler(
+        parser=_InlineParser(),
+        object_store=_InlineObjectStore(text_pdf_bytes),
+    )
     producer = FakeProducer()
     consumer = TaskConsumer(Settings(mq_consumer_enabled=False), producer)
     channel = FakeChannel()
