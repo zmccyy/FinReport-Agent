@@ -21,7 +21,7 @@ import urllib.request
 from dataclasses import dataclass
 
 # ============================================================================
-# 拓扑定义：spec §3.1 — 4 exchange + 6 核心队列 + DLQ
+# 拓扑定义：spec §3.1 — 核心队列/DLQ + 三段延迟重试拓扑
 # ============================================================================
 
 # DLQ 消息 TTL：7 天（毫秒）
@@ -54,12 +54,28 @@ class BindingDef:
     routing_key: str
 
 
-# 4 个 exchange
+# 延迟重试队列：后端 TaskMessageProducer 的 1s / 5s / 30s 退避链。
+# TTL 到期后回到 task.exchange，并使用保留的原始 routing key 路由至业务队列。
+RETRY_DELAYS_MS = {
+    "1s": 1_000,
+    "5s": 5_000,
+    "30s": 30_000,
+}
+
+# 4 个基础 exchange + 3 个延迟重试 exchange。
 EXCHANGES = [
     ExchangeDef(name="task.exchange", type="direct", description="L2 → L3 任务下发"),
     ExchangeDef(name="progress.exchange", type="fanout", description="L3 → L2 进度广播"),
     ExchangeDef(name="chat.exchange", type="direct", description="L2 → L3 问答请求"),
     ExchangeDef(name="kb.exchange", type="topic", description="离线知识库构建"),
+    *[
+        ExchangeDef(
+            name=f"task.retry.{delay_name}.exchange",
+            type="direct",
+            description=f"任务延迟重试 {delay_name}",
+        )
+        for delay_name in RETRY_DELAYS_MS
+    ],
 ]
 
 # 6 个核心队列（每个自动配 DLQ: q.{name}.dlq）
@@ -71,6 +87,9 @@ QUEUES = [
     QueueDef(name="q.chat.requests"),
     QueueDef(name="q.kb.build"),
 ]
+
+# 业务步骤路由键，同时被 task.exchange 与每个 retry exchange 复用。
+TASK_ROUTING_KEYS = ("parse", "extract.bs", "extract.is", "extract.cf", "check", "report")
 
 # 绑定关系
 BINDINGS = [
@@ -90,6 +109,17 @@ BINDINGS = [
     BindingDef(exchange="kb.exchange", queue="q.kb.build", routing_key="kb.build.industry"),
 ]
 
+# 延迟队列中每个业务路由键都必须有 binding；TTL 后 dead-letter 回 task.exchange。
+BINDINGS.extend(
+    BindingDef(
+        exchange=f"task.retry.{delay_name}.exchange",
+        queue=f"q.task.retry.{delay_name}",
+        routing_key=routing_key,
+    )
+    for delay_name in RETRY_DELAYS_MS
+    for routing_key in TASK_ROUTING_KEYS
+)
+
 
 def print_topology():
     """打印完整拓扑预览。"""
@@ -103,12 +133,16 @@ def print_topology():
     for ex in EXCHANGES:
         print(f"  {ex.name:<24} {ex.type:<10} {ex.description}")
 
-    print(f"\n[Queue] ({len(QUEUES)} core + {len(QUEUES)} DLQ = {len(QUEUES)*2}):")
+    print(f"\n[Queue] ({len(QUEUES)} core + {len(QUEUES)} DLQ = {len(QUEUES) * 2}):")
     print(f"  {'核心队列':<28} {'死信队列':<28}")
     print(f"  {'-'*28} {'-'*28}")
     for q in QUEUES:
         dlq_name = f"{q.name}.dlq"
         print(f"  {q.name:<28} {dlq_name:<28}")
+
+    print(f"\n[Retry Queue] ({len(RETRY_DELAYS_MS)}):")
+    for delay_name, ttl_ms in RETRY_DELAYS_MS.items():
+        print(f"  q.task.retry.{delay_name:<20} TTL={ttl_ms}ms -> task.exchange")
 
     print(f"\n[Binding] ({len(BINDINGS)}):")
     print(f"  {'Exchange':<24} → {'Queue':<24}  routing_key: {''}")
@@ -215,6 +249,21 @@ def declare_topology(
 
             print(f"  [OK] {q.name}  ->  {dlq_name} (TTL=7d, max_len={DLQ_MAX_LENGTH})")
 
+        # --- 声明延迟重试队列 ---
+        print("\n[Retry Queue] 声明:")
+        for delay_name, ttl_ms in RETRY_DELAYS_MS.items():
+            retry_queue = f"q.task.retry.{delay_name}"
+            channel.queue_declare(
+                queue=retry_queue,
+                durable=True,
+                auto_delete=False,
+                arguments={
+                    "x-message-ttl": ttl_ms,
+                    "x-dead-letter-exchange": "task.exchange",
+                },
+            )
+            print(f"  [OK] {retry_queue} (TTL={ttl_ms}ms -> task.exchange)")
+
         # --- 绑定 ---
         print("\n[Binding] 声明:")
         for b in BINDINGS:
@@ -236,7 +285,7 @@ def declare_topology(
         print(f"\n{'='*70}")
         print(f"拓扑声明完成:")
         print(f"  {len(EXCHANGES)} exchange")
-        print(f"  {len(QUEUES)} 核心队列 + {len(QUEUES)} DLQ = {len(QUEUES)*2} 队列")
+        print(f"  {len(QUEUES)} 核心队列 + {len(QUEUES)} DLQ + {len(RETRY_DELAYS_MS)} retry = {len(QUEUES) * 2 + len(RETRY_DELAYS_MS)} 队列")
         print(f"  {len(BINDINGS)} binding")
         print(f"\n验证: 打开 http://{host}:15672 管理界面查看 Queues/Exchanges 页签")
         print(f"{'='*70}")

@@ -1,9 +1,4 @@
-"""
-健康检查端点。
-
-提供 /internal/health 用于 Docker Compose healthcheck
-和运维探活。M1.13 将扩展添加各组件拨测。
-"""
+"""Health check endpoint."""
 
 from fastapi import APIRouter
 
@@ -11,13 +6,10 @@ router = APIRouter(tags=["system"])
 
 
 @router.get("/internal/health")
-async def health():
-    """系统健康检查。
+async def health() -> dict[str, str]:
+    """Return the liveness response consumed by Docker Compose.
 
     Returns:
-        dict: 包含状态、服务名和时间戳。
+        Service liveness details.
     """
-    return {
-        "status": "UP",
-        "service": "finreport-ai-service",
-    }
+    return {"status": "UP", "service": "finreport-ai-service"}
