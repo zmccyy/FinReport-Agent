@@ -19,4 +19,15 @@
         <Class name="com.finreport.security.JwtUtil"/>
         <Bug pattern="CT_CONSTRUCTOR_THROW"/>
     </Match>
+
+    <!--
+      StatementsResponse is an immutable Java record. The compact constructor already wraps
+      each List via List.copyOf, so the accessor returns an unmodifiable view and external
+      callers cannot mutate internal state. SpotBugs cannot statically prove List.copyOf's
+      immutability, so EI_EXPOSE_REP is a false positive here.
+    -->
+    <Match>
+        <Class name="com.finreport.domain.dto.StatementsResponse"/>
+        <Bug pattern="EI_EXPOSE_REP"/>
+    </Match>
 </FindBugsFilter>

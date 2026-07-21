@@ -11,6 +11,7 @@ import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.reactive.TransactionalOperator;
 
+import com.finreport.domain.entity.Report;
 import com.finreport.domain.entity.Task;
 import com.finreport.domain.entity.TaskStep;
 import com.finreport.domain.enums.StepStatus;
@@ -18,8 +19,10 @@ import com.finreport.domain.enums.TaskStepName;
 import com.finreport.domain.enums.TaskStatus;
 import com.finreport.exception.BusinessException;
 import com.finreport.mq.TaskMessageProducer;
+import com.finreport.repository.ReportRepository;
 import com.finreport.repository.TaskRepository;
 import com.finreport.repository.TaskStepRepository;
+import com.finreport.service.statement.StatementWriter;
 import com.finreport.trace.TraceContext;
 
 import reactor.core.publisher.Flux;
@@ -42,10 +45,6 @@ public class TaskOrchestrator {
     private static final int PROGRESS_EXTRACT = 55;
     private static final int PROGRESS_CHECK = 75;
     private static final int PROGRESS_REPORT = 100;
-    private static final List<TaskStepName> EXTRACTION_STEPS = List.of(
-            TaskStepName.EXTRACT_BS,
-            TaskStepName.EXTRACT_IS,
-            TaskStepName.EXTRACT_CF);
 
     private final TaskRepository taskRepo;
     private final TaskStepRepository stepRepo;
@@ -53,6 +52,11 @@ public class TaskOrchestrator {
     private final TaskMessageProducer messageProducer;
     private final DatabaseClient databaseClient;
     private final TransactionalOperator transactionalOperator;
+    private final ExtractDispatcher extractDispatcher;
+    private final ExtractCompletionTracker extractTracker;
+    private final StatementWriter statementWriter;
+    private final ExtractCacheService extractCacheService;
+    private final ReportRepository reportRepo;
 
     public TaskOrchestrator(
             TaskRepository taskRepo,
@@ -60,13 +64,23 @@ public class TaskOrchestrator {
             TaskStateMachine stateMachine,
             TaskMessageProducer messageProducer,
             DatabaseClient databaseClient,
-            TransactionalOperator transactionalOperator) {
+            TransactionalOperator transactionalOperator,
+            ExtractDispatcher extractDispatcher,
+            ExtractCompletionTracker extractTracker,
+            StatementWriter statementWriter,
+            ExtractCacheService extractCacheService,
+            ReportRepository reportRepo) {
         this.taskRepo = taskRepo;
         this.stepRepo = stepRepo;
         this.stateMachine = stateMachine;
         this.messageProducer = messageProducer;
         this.databaseClient = databaseClient;
         this.transactionalOperator = transactionalOperator;
+        this.extractDispatcher = extractDispatcher;
+        this.extractTracker = extractTracker;
+        this.statementWriter = statementWriter;
+        this.extractCacheService = extractCacheService;
+        this.reportRepo = reportRepo;
     }
 
     /**
@@ -486,7 +500,16 @@ public class TaskOrchestrator {
                             .then(updateTaskProgress(task, stepName))
                             .flatMap(updatedTask -> {
                                 if (stepName.startsWith("EXTRACT_")) {
-                                    return handleExtractStepSuccess(updatedTask, taskId);
+                                    // M2.09: persist extracted statement rows before triggering CHECK.
+                                    // Write failures are logged inside StatementWriter but do not
+                                    // block the state machine — a missing row surfaces as a CHECK
+                                    // rule failure downstream (spec §8.4 失败不强制回滚).
+                                    // M2.10: cache the extract result by pdf_md5 + step so the next
+                                    // upload of the same PDF can skip extract entirely (spec §3.10).
+                                    return statementWriter.writeStatement(taskId, stepName, result)
+                                            .then(storeExtractCache(taskId, TaskStepName.valueOf(stepName), result))
+                                            .then(handleExtractStepSuccess(
+                                                    updatedTask, taskId, TaskStepName.valueOf(stepName)));
                                 }
                                 return handleNonExtractStepSuccess(updatedTask, stepName, taskId);
                             });
@@ -524,6 +547,8 @@ public class TaskOrchestrator {
                 && current != TaskStatus.EXTRACT_SUCCESS) {
             return Mono.just(task);
         }
+        // Reconcile path intentionally bypasses the Redis tracker: redelivered SUCCESS events
+        // cannot reconstruct per-step recordSuccess calls, so MySQL remains source of truth.
         return checkAllExtractsDone(taskId)
                 .flatMap(allDone -> {
                     if (!Boolean.TRUE.equals(allDone)) {
@@ -532,23 +557,53 @@ public class TaskOrchestrator {
                     if (current == TaskStatus.EXTRACT_SUCCESS) {
                         return dispatchStepIfPending(task, TaskStepName.CHECK, buildPayload(task));
                     }
-                    return handleExtractStepSuccess(task, taskId);
+                    task.setStatus(TaskStatus.EXTRACT_SUCCESS.name());
+                    task.setProgress(PROGRESS_EXTRACT);
+                    return taskRepo.save(task)
+                            .flatMap(saved -> dispatchStepIfPending(
+                                    saved, TaskStepName.CHECK, buildPayload(saved)));
                 });
     }
 
-    private Mono<Task> handleExtractStepSuccess(Task updatedTask, String taskId) {
+    /**
+     * Handle a successful EXTRACT_BS / EXTRACT_IS / EXTRACT_CF progress event.
+     *
+     * <p>Hot path: Redis {@link ExtractCompletionTracker#recordSuccess} returns the
+     * current success count atomically; when count reaches
+     * {@link ExtractCompletionTracker#EXPECTED_COUNT} and no failed flag is set,
+     * transition to {@code EXTRACT_SUCCESS} and dispatch CHECK without touching MySQL
+     * {@code task_step} for the completion check (spec §3.2.1 AtomicInteger fast path).</p>
+     *
+     * <p>Fallback: Redis unavailable or hot path ambiguous (count &lt; EXPECTED_COUNT
+     * or failed flag set) → fall back to {@link #checkAllExtractsDone} MySQL reconcile.</p>
+     */
+    private Mono<Task> handleExtractStepSuccess(Task updatedTask, String taskId, TaskStepName step) {
+        return extractTracker.recordSuccess(taskId, step)
+                .flatMap(count -> extractTracker.hasFailed(taskId)
+                        .flatMap(failed -> {
+                            if (count >= ExtractCompletionTracker.EXPECTED_COUNT && !failed) {
+                                return transitionToExtractSuccess(updatedTask);
+                            }
+                            return reconcileExtractViaMysql(updatedTask, taskId);
+                        }));
+    }
+
+    private Mono<Task> transitionToExtractSuccess(Task updatedTask) {
+        updatedTask.setStatus(TaskStatus.EXTRACT_SUCCESS.name());
+        updatedTask.setProgress(PROGRESS_EXTRACT);
+        return taskRepo.save(updatedTask)
+                .flatMap(saved -> dispatchStepIfPending(
+                        saved, TaskStepName.CHECK, buildPayload(saved)));
+    }
+
+    private Mono<Task> reconcileExtractViaMysql(Task updatedTask, String taskId) {
         return checkAllExtractsDone(taskId)
                 .flatMap(allDone -> {
                     if (Boolean.TRUE.equals(allDone)) {
-                        updatedTask.setStatus(TaskStatus.EXTRACT_SUCCESS.name());
-                        updatedTask.setProgress(PROGRESS_EXTRACT);
-                        return taskRepo.save(updatedTask)
-                                .flatMap(saved -> dispatchStepIfPending(
-                                        saved, TaskStepName.CHECK, buildPayload(saved)));
-                    } else {
-                        updatedTask.setStatus(TaskStatus.EXTRACT_PARTIAL.name());
-                        return taskRepo.save(updatedTask);
+                        return transitionToExtractSuccess(updatedTask);
                     }
+                    updatedTask.setStatus(TaskStatus.EXTRACT_PARTIAL.name());
+                    return taskRepo.save(updatedTask);
                 });
     }
 
@@ -599,13 +654,17 @@ public class TaskOrchestrator {
      * 将三个报表抽取步骤统一切换到运行态并逐个发布到 RabbitMQ。
      *
      * <p>任务级状态只从 {@code PARSE_SUCCESS} 转换一次到 {@code EXTRACT_RUNNING}；
-     * 后续三个步骤不能复用 {@link #dispatchStep}，否则会触发不允许的
-     * {@code EXTRACT_RUNNING -> EXTRACT_RUNNING} 自转换。</p>
+     * 之后委托 {@link ExtractDispatcher#dispatchAll} 完成 step 级 RUNNING 标记 + MQ 发布 +
+     * Redis 计数器 reset（spec §3.2.1 AtomicInteger + M2.08）。</p>
+     *
+     * <p>M2.10: 在 {@link ExtractDispatcher#dispatchAll} 之前先查 {@link ExtractCacheService}
+     * 三表全部命中即跳过 MQ 投递，重放 3 条 success 路径并直接调度 CHECK
+     * （spec §3.10：同 pdf_md5 重传命中缓存，跳过 extract）。</p>
      */
     private Mono<Task> dispatchExtractionSteps(Task task, Map<String, Object> payload) {
         TaskStatus current = TaskStatus.valueOf(task.getStatus());
         if (current == TaskStatus.EXTRACT_RUNNING) {
-            return publishPendingExtractionSteps(task, payload).thenReturn(task);
+            return checkCacheAndReplayOrDispatch(task, payload);
         }
         if (!stateMachine.canTransition(current, TaskStatus.EXTRACT_RUNNING)) {
             return Mono.error(new BusinessException(
@@ -617,40 +676,75 @@ public class TaskOrchestrator {
         task.setStatus(TaskStatus.EXTRACT_RUNNING.name());
         task.setCurrentStep(TaskStepName.EXTRACT_BS.name());
         return taskRepo.save(task)
-                .flatMap(saved -> publishPendingExtractionSteps(saved, payload).thenReturn(saved));
-    }
-
-    private Mono<Void> publishPendingExtractionSteps(Task task, Map<String, Object> payload) {
-        return Flux.fromIterable(EXTRACTION_STEPS)
-                .concatMap(step -> markExtractionStepRunningAndPublish(task, step, payload))
-                .then();
+                .flatMap(saved -> checkCacheAndReplayOrDispatch(saved, payload));
     }
 
     /**
-     * 将单个抽取步骤标记为 RUNNING 并发布对应的持久化消息。
+     * 查 extract 缓存：三表全部命中则重放缓存结果并直接调度 CHECK；否则走 MQ 投递。
+     *
+     * <p>Report 不存在（找不到 pdf_md5 关联）或 Redis 故障时静默 fallback 到
+     * {@link ExtractDispatcher#dispatchAll}（spec §3.10 失败策略）。
+     * 部分命中（size &lt; 3）也走 MQ，避免半缓存导致数据不一致。</p>
      */
-    private Mono<Void> markExtractionStepRunningAndPublish(
-            Task task, TaskStepName step, Map<String, Object> payload) {
-        return stepRepo.findByTaskIdAndStepName(task.getId(), step.name())
-                .switchIfEmpty(Mono.error(new BusinessException(
-                        org.springframework.http.HttpStatus.NOT_FOUND,
-                        "TASK_STEP_NOT_FOUND", "任务步骤不存在: " + step.name())))
-                .flatMap(stepRecord -> {
-                    if (!StepStatus.PENDING.name().equals(stepRecord.getStatus())) {
-                        return Mono.empty();
-                    }
-                    stepRecord.setStatus(StepStatus.RUNNING.name());
-                    stepRecord.setStartedAt(LocalDateTime.now());
-                    return stepRepo.save(stepRecord)
-                            .then(Mono.deferContextual(context -> Mono.<Void>fromRunnable(() ->
-                                    messageProducer.publishTaskStep(
-                                            task.getId(),
-                                            step.getRoutingKey(),
-                                            payload,
-                                            context.getOrDefault(TraceContext.TRACE_ID, "")))))
-                            .onErrorResume(com.finreport.exception.IntegrationException.class,
-                                    error -> markDispatchFailed(task, stepRecord, error)
-                                            .then(Mono.<Void>error(error)));
+    private Mono<Task> checkCacheAndReplayOrDispatch(Task task, Map<String, Object> payload) {
+        String taskId = task.getId();
+        return reportRepo.findByTaskId(taskId)
+                .flatMap(report -> extractCacheService.lookupAll(report.getPdfMd5())
+                        .flatMap(cached -> {
+                            if (cached.size() == ExtractCacheService.EXTRACTION_STEPS.size()) {
+                                log.info("[TaskOrchestrator] extract 缓存全部命中，跳过 MQ taskId={} pdfMd5={}",
+                                        taskId, report.getPdfMd5());
+                                return replayCachedExtracts(task, cached);
+                            }
+                            log.debug("[TaskOrchestrator] extract 缓存部分命中 ({}/3)，走 MQ taskId={} pdfMd5={}",
+                                    cached.size(), taskId, report.getPdfMd5());
+                            return extractDispatcher.dispatchAll(task, payload).thenReturn(task);
+                        }))
+                .switchIfEmpty(Mono.defer(() -> {
+                    log.debug("[TaskOrchestrator] 无 report 关联，直接走 MQ extract taskId={}", taskId);
+                    return extractDispatcher.dispatchAll(task, payload).thenReturn(task);
+                }));
+    }
+
+    /**
+     * 重放 3 条 extract 缓存结果：逐条标记 step SUCCESS + 调 StatementWriter 写库，
+     * 然后复用 {@link #transitionToExtractSuccess} 跳到 CHECK 调度。
+     *
+     * <p>缓存重放路径不调 {@link ExtractCompletionTracker}（计数器专为 MQ 回报设计）；
+     * 也不调 {@code extractCacheService.store}，避免重复写缓存。</p>
+     */
+    private Mono<Task> replayCachedExtracts(
+            Task task, Map<TaskStepName, Map<String, Object>> cached) {
+        String taskId = task.getId();
+        return Flux.fromIterable(ExtractCacheService.EXTRACTION_STEPS)
+                .concatMap(step -> stepRepo.findByTaskIdAndStepName(taskId, step.name())
+                        .switchIfEmpty(Mono.error(new BusinessException(
+                                org.springframework.http.HttpStatus.NOT_FOUND,
+                                "TASK_STEP_NOT_FOUND", "任务步骤不存在: " + step.name())))
+                        .flatMap(stepRecord -> {
+                            stepRecord.setStatus(StepStatus.SUCCESS.name());
+                            stepRecord.setFinishedAt(LocalDateTime.now());
+                            Map<String, Object> cachedResult = cached.get(step);
+                            return stepRepo.save(stepRecord)
+                                    .then(statementWriter.writeStatement(taskId, step.name(), cachedResult));
+                        }))
+                .then(transitionToExtractSuccess(task));
+    }
+
+    /**
+     * 写入 extract 缓存（pdf_md5 + step → result）。
+     *
+     * <p>由 {@link #handleStepSuccess} 在 L3 extract progress SUCCESS 后调用。
+     * Report 找不到或 pdf_md5 为空时跳过缓存写入（{@link ExtractCacheService#store}
+     * 内部对 null pdfMd5 返回空 Mono）；Redis 故障在 cache 层已静默吞掉。</p>
+     */
+    private Mono<Void> storeExtractCache(String taskId, TaskStepName step, Map<String, Object> result) {
+        return reportRepo.findByTaskId(taskId)
+                .flatMap(report -> extractCacheService.store(report.getPdfMd5(), step, result))
+                .onErrorResume(error -> {
+                    log.warn("[TaskOrchestrator] storeExtractCache 失败 taskId={} step={}",
+                            taskId, step, error);
+                    return Mono.empty();
                 });
     }
 
@@ -674,17 +768,23 @@ public class TaskOrchestrator {
     private Mono<Task> handleStepFailure(Task task, String stepName, Map<String, Object> result) {
         String taskId = task.getId();
         log.debug("[TaskOrchestrator] 步骤失败 taskId={} step={}", taskId, stepName);
-        return stepRepo.findByTaskIdAndStepName(taskId, stepName)
+        // EXTRACT_* failure sets Redis failed flag so the hot-path CHECK trigger in
+        // handleExtractStepSuccess is blocked until retry clears it via clearFailure.
+        Mono<Void> recordFailure = stepName.startsWith("EXTRACT_")
+                ? extractTracker.recordFailure(taskId, TaskStepName.valueOf(stepName))
+                : Mono.empty();
+        return recordFailure.then(stepRepo.findByTaskIdAndStepName(taskId, stepName)
                 .switchIfEmpty(Mono.error(new BusinessException(
                         org.springframework.http.HttpStatus.NOT_FOUND,
                         "TASK_STEP_NOT_FOUND", "任务步骤不存在: " + stepName)))
-                .flatMap(step -> scheduleRetryOrFail(task, step, result));
+                .flatMap(step -> scheduleRetryOrFail(task, step, result)));
     }
 
     private Mono<Task> scheduleRetryOrFail(Task task, TaskStep step, Map<String, Object> result) {
         int retries = step.getRetryCount() == null ? 0 : step.getRetryCount();
         String taskId = task.getId();
         String stepName = step.getStepName();
+        boolean isExtract = stepName.startsWith("EXTRACT_");
         if (retries >= TaskStateMachine.MAX_RETRIES) {
             step.setStatus(StepStatus.FAILED.name());
             step.setFinishedAt(LocalDateTime.now());
@@ -692,6 +792,8 @@ public class TaskOrchestrator {
             task.setStatus(TaskStatus.FAILED.name());
             task.setFinishedAt(LocalDateTime.now());
             task.setErrorMsg("步骤 " + stepName + " 重试耗尽");
+            // Terminal FAILED: leave the failed flag set so any late-arriving sibling SUCCESS
+            // cannot trigger CHECK via the hot path.
             return stepRepo.save(step).then(taskRepo.save(task));
         }
 
@@ -702,8 +804,12 @@ public class TaskOrchestrator {
         step.setRetryCount(nextRetry);
         step.setErrorMsg(errorMessage(result));
         task.setStatus(retryStatus.name());
+        // EXTRACT retry path clears the failed flag so a successful retry lets the
+        // hot-path CHECK trigger fire when the third sibling SUCCESS arrives.
+        Mono<Void> clearFailure = isExtract ? extractTracker.clearFailure(taskId) : Mono.empty();
         return stepRepo.save(step)
                 .then(taskRepo.save(task))
+                .flatMap(saved -> clearFailure.thenReturn(saved))
                 .flatMap(saved -> Mono.deferContextual(context -> Mono.fromCallable(() -> {
                     String traceId = context.getOrDefault(TraceContext.TRACE_ID, org.slf4j.MDC.get("traceId"));
                     messageProducer.publishRetry(
