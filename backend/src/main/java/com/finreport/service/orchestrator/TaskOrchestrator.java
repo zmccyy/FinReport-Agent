@@ -547,9 +547,15 @@ public class TaskOrchestrator {
                 && current != TaskStatus.EXTRACT_SUCCESS) {
             return Mono.just(task);
         }
-        // Reconcile path intentionally bypasses the Redis tracker: redelivered SUCCESS events
-        // cannot reconstruct per-step recordSuccess calls, so MySQL remains source of truth.
-        return checkAllExtractsDone(taskId)
+        // M2 review fix (Blocker F): step SUCCESS 但 statement 可能未写入(进程崩溃在 step.save
+        // 之后、statementWriter.writeStatement 之前)。reconcile 路径必须先补写 statement,
+        // 否则 CHECK 阶段因数据缺失失败。从 ExtractCacheService 拿 fallback result 重写。
+        return ensureStatementsWritten(task, taskId)
+                .then(Mono.defer(() -> {
+                    // Reconcile path intentionally bypasses the Redis tracker: redelivered SUCCESS events
+                    // cannot reconstruct per-step recordSuccess calls, so MySQL remains source of truth.
+                    return checkAllExtractsDone(taskId);
+                }))
                 .flatMap(allDone -> {
                     if (!Boolean.TRUE.equals(allDone)) {
                         return Mono.just(task);
@@ -562,6 +568,40 @@ public class TaskOrchestrator {
                     return taskRepo.save(task)
                             .flatMap(saved -> dispatchStepIfPending(
                                     saved, TaskStepName.CHECK, buildPayload(saved)));
+                });
+    }
+
+    /**
+     * 对 3 个 EXTRACT step 并行补写 statement（幂等）。
+     *
+     * <p>M2 review fix (Blocker F): 从 reportRepo 拿 pdfMd5,对每个 EXTRACT step
+     * 调 {@link ExtractCacheService#lookup} 拿 fallback result,
+     * 再调 {@link StatementWriter#ensureStatementWritten} 检查 + 补写。
+     * report 不存在 / pdfMd5 为空 / cache miss / fsRepo 检查失败均静默跳过,
+     * CHECK 阶段会因数据缺失自然失败暴露问题(spec §8.4)。</p>
+     */
+    private Mono<Void> ensureStatementsWritten(Task task, String taskId) {
+        return reportRepo.findByTaskId(taskId)
+                .flatMap(report -> {
+                    String pdfMd5 = report.getPdfMd5();
+                    if (pdfMd5 == null || pdfMd5.isBlank()) {
+                        log.debug("[TaskOrchestrator] ensureStatementsWritten pdfMd5 为空,跳过 taskId={}", taskId);
+                        return Mono.<Void>empty();
+                    }
+                    return Flux.fromIterable(ExtractCacheService.EXTRACTION_STEPS)
+                            .flatMap(step -> extractCacheService.lookup(pdfMd5, step)
+                                    .flatMap(cachedResult -> statementWriter.ensureStatementWritten(
+                                            taskId, step.name(), cachedResult))
+                                    .onErrorResume(error -> {
+                                        log.warn("[TaskOrchestrator] ensureStatementsWritten 单步失败 taskId={} step={}",
+                                                taskId, step.name(), error);
+                                        return Mono.just(0);
+                                    }))
+                            .then();
+                })
+                .onErrorResume(error -> {
+                    log.warn("[TaskOrchestrator] ensureStatementsWritten 整体失败 taskId={}", taskId, error);
+                    return Mono.empty();
                 });
     }
 
@@ -712,6 +752,10 @@ public class TaskOrchestrator {
      *
      * <p>缓存重放路径不调 {@link ExtractCompletionTracker}（计数器专为 MQ 回报设计）；
      * 也不调 {@code extractCacheService.store}，避免重复写缓存。</p>
+     *
+     * <p><b>M2 review fix (Blocker B): 幂等短路</b> — 若 step 已是 SUCCESS（极端并发场景
+     * 下同 taskId 被触发两次 replay），跳过 setStatus / save / writeStatement，避免重复
+     * 写 financial_statement 行造成数据膨胀。已成功 step 视为已写入，直接进入下一个。</p>
      */
     private Mono<Task> replayCachedExtracts(
             Task task, Map<TaskStepName, Map<String, Object>> cached) {
@@ -722,11 +766,17 @@ public class TaskOrchestrator {
                                 org.springframework.http.HttpStatus.NOT_FOUND,
                                 "TASK_STEP_NOT_FOUND", "任务步骤不存在: " + step.name())))
                         .flatMap(stepRecord -> {
+                            if (StepStatus.SUCCESS.name().equals(stepRecord.getStatus())) {
+                                log.info("[TaskOrchestrator] replay 短路：step 已 SUCCESS，跳过写库 taskId={} step={}",
+                                        taskId, step.name());
+                                return Mono.just(stepRecord);
+                            }
                             stepRecord.setStatus(StepStatus.SUCCESS.name());
                             stepRecord.setFinishedAt(LocalDateTime.now());
                             Map<String, Object> cachedResult = cached.get(step);
                             return stepRepo.save(stepRecord)
-                                    .then(statementWriter.writeStatement(taskId, step.name(), cachedResult));
+                                    .then(statementWriter.writeStatement(taskId, step.name(), cachedResult))
+                                    .thenReturn(stepRecord);
                         }))
                 .then(transitionToExtractSuccess(task));
     }

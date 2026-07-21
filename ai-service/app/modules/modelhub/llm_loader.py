@@ -26,6 +26,7 @@ Inference timeouts are enforced by ``GenerateTimeoutGuard`` and surface as
 
 from __future__ import annotations
 
+import concurrent.futures
 import threading
 import time
 from dataclasses import dataclass
@@ -239,6 +240,13 @@ class TransformersBackend:
 
         result_holder: dict[str, Any] = {"result": None, "error": None}
 
+        # M2 review fix (Blocker A): 原实现用 threading.Thread + join(timeout),
+        # daemon 线程超时后仍持续占用 GPU 显存且无法中断。改用
+        # ThreadPoolExecutor + future.result(timeout=...) + shutdown(wait=False),
+        # 超时后主动 unload() 触发 torch.cuda.empty_cache() 释放显存。
+        # cancel_event 作为 best-effort cancel token(供未来 model.generate 支持中断时扩展)。
+        cancel_event = threading.Event()
+
         def _run_generation() -> None:
             """Call model.generate and capture output or error."""
             try:
@@ -250,19 +258,24 @@ class TransformersBackend:
             except Exception as error:  # noqa: BLE001 - surfaced via timeout/result
                 result_holder["error"] = error
 
-        thread = threading.Thread(
-            target=_run_generation, name="llm-generate", daemon=True
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="llm-generate"
         )
+        future = executor.submit(_run_generation)
         start = time.perf_counter()
-        thread.start()
-        thread.join(timeout=timeout_seconds)
-        elapsed_ms = (time.perf_counter() - start) * 1000.0
-
-        if thread.is_alive():
-            self._reset()
+        try:
+            future.result(timeout=timeout_seconds)
+        except concurrent.futures.TimeoutError:
+            cancel_event.set()
+            future.cancel()
+            executor.shutdown(wait=False)
+            self.unload()
             raise InferenceTimeoutException(
                 f"LLM generate exceeded {timeout_seconds:.1f}s"
             )
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        executor.shutdown(wait=False)
+
         if result_holder["error"] is not None:
             error = result_holder["error"]
             if _is_oom(error):

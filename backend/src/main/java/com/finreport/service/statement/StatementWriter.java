@@ -153,12 +153,75 @@ public class StatementWriter {
     }
 
     /**
+     * 幂等保证：检查某条 EXTRACT step 的科目是否已写入 financial_statement 表，
+     * 缺失则用 {@code fallbackResult} 重写。
+     *
+     * <p><b>M2 review fix (Blocker F)</b> — 场景：进程崩溃发生在 step.setStatus(SUCCESS)
+     * 之后、{@link #writeStatement} 完成之前。MQ 重放 progress SUCCESS 时，
+     * {@code TaskOrchestrator.reconcileSuccessfulStep} 进入 EXTRACT_* 分支只调度 CHECK，
+     * 不重写 statement，导致 CHECK 阶段因数据缺失失败。本方法在 reconcile 路径补写 statement。</p>
+     *
+     * <p>幂等性：用 {@code fsRepo.countByReportIdAndStatementType} 检查 count，
+     * count > 0 视为已写入直接返回 0；count == 0 才调 {@link #writeStatement} 重写。
+     * {@code fallbackResult} 为 null 或 empty 时跳过（cache miss 场景，CHECK 自然失败暴露问题）。</p>
+     *
+     * @param taskId         任务 ID
+     * @param stepName       步骤名称（EXTRACT_BS / EXTRACT_IS / EXTRACT_CF）
+     * @param fallbackResult 从 ExtractCacheService 拿到的缓存 result payload；null 表示缓存缺失
+     * @return 已写入的科目行数（已存在或缓存缺失均返回 0）
+     */
+    public Mono<Integer> ensureStatementWritten(
+            String taskId, String stepName, Map<String, Object> fallbackResult) {
+        String statementType = mapStatementType(stepName);
+        if (statementType == null) {
+            log.debug("[StatementWriter] ensureStatementWritten 非 EXTRACT 步骤，跳过 taskId={} step={}",
+                    taskId, stepName);
+            return Mono.just(0);
+        }
+        if (fallbackResult == null || fallbackResult.isEmpty()) {
+            log.warn("[StatementWriter] ensureStatementWritten fallback 为空，无法补写 taskId={} step={}",
+                    taskId, stepName);
+            return Mono.just(0);
+        }
+
+        return resolveReportId(taskId)
+                .flatMap(reportId -> {
+                    if (reportId == null) {
+                        log.warn("[StatementWriter] ensureStatementWritten 无 reportId，跳过 taskId={} step={}",
+                                taskId, stepName);
+                        return Mono.just(0);
+                    }
+                    return fsRepo.countByReportIdAndStatementType(reportId, statementType)
+                            .flatMap(count -> {
+                                if (count != null && count > 0) {
+                                    log.info("[StatementWriter] ensureStatementWritten 已存在 rows={} taskId={} step={}",
+                                            count, taskId, stepName);
+                                    return Mono.just(count.intValue());
+                                }
+                                log.info("[StatementWriter] ensureStatementWritten 补写 statement taskId={} step={}",
+                                        taskId, stepName);
+                                return writeStatement(taskId, stepName, fallbackResult);
+                            })
+                            .onErrorResume(error -> {
+                                log.error("[StatementWriter] ensureStatementWritten 检查/补写失败 taskId={} step={}",
+                                        taskId, stepName, error);
+                                return Mono.just(0);
+                            });
+                })
+                .switchIfEmpty(Mono.defer(() -> {
+                    log.warn("[StatementWriter] ensureStatementWritten 无 report 关联 taskId={} step={}",
+                            taskId, stepName);
+                    return Mono.just(0);
+                }));
+    }
+
+    /**
      * 把 stepName 映射为 L3 {@code StatementType.value}。
      *
      * <p>使用 String 常量而非 enum，避免在 L2 端引入对 L3 枚举的依赖；
      * 字符串值在 spec §5.2 + L3 {@code StatementType} 双方锁定。</p>
      */
-    private static String mapStatementType(String stepName) {
+    static String mapStatementType(String stepName) {
         return switch (stepName) {
             case "EXTRACT_BS" -> STATEMENT_TYPE_BS;
             case "EXTRACT_IS" -> STATEMENT_TYPE_IS;

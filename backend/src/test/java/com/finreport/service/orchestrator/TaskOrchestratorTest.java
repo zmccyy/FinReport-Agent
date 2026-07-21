@@ -901,5 +901,120 @@ class TaskOrchestratorTest {
             // Cache store called with resolved pdfMd5 + step + result
             verify(extractCacheService).store("md5-store", TaskStepName.EXTRACT_BS, result);
         }
+
+        @Test
+        @DisplayName("M2 review Blocker B: replay 短路已 SUCCESS 的 step，不重复写库")
+        void shouldShortCircuitReplayForAlreadySuccessfulStep() {
+            Task task = Task.builder()
+                    .id("task-replay-idempotent")
+                    .userId(1L)
+                    .status(TaskStatus.PARSE_RUNNING.name())
+                    .payload("{\"pdfObjectKey\":\"uploads/test.pdf\"}")
+                    .build();
+            Report report = Report.builder()
+                    .id(20L)
+                    .taskId(task.getId())
+                    .pdfMd5("md5-replay-idempotent")
+                    .build();
+            // BS 已 SUCCESS（极端并发场景：上次 replay 已写过）
+            TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
+                    .status(StepStatus.RUNNING.name()).build();
+            TaskStep bs = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
+                    .status(StepStatus.SUCCESS.name()).build();
+            TaskStep is = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_IS")
+                    .status(StepStatus.PENDING.name()).build();
+            TaskStep cf = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_CF")
+                    .status(StepStatus.PENDING.name()).build();
+            TaskStep check = TaskStep.builder().taskId(task.getId()).stepName("CHECK")
+                    .status(StepStatus.PENDING.name()).build();
+
+            Map<String, Object> bsResult = Map.of("success", true, "statement", Map.of());
+            Map<String, Object> isResult = Map.of("success", true, "statement", Map.of());
+            Map<String, Object> cfResult = Map.of("success", true, "statement", Map.of());
+            Map<TaskStepName, Map<String, Object>> cached = Map.of(
+                    TaskStepName.EXTRACT_BS, bsResult,
+                    TaskStepName.EXTRACT_IS, isResult,
+                    TaskStepName.EXTRACT_CF, cfResult);
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(bs));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS")).thenReturn(Mono.just(is));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_CF")).thenReturn(Mono.just(cf));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "CHECK")).thenReturn(Mono.just(check));
+            when(reportRepo.findByTaskId(task.getId())).thenReturn(Mono.just(report));
+            when(extractCacheService.lookupAll("md5-replay-idempotent")).thenReturn(Mono.just(cached));
+            when(statementWriter.writeStatement(anyString(), anyString(), any())).thenReturn(Mono.just(5));
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of())
+                            .contextWrite(ctx -> ctx.put(TraceContext.TRACE_ID, "replay-trace")))
+                    .assertNext(saved -> assertEquals(TaskStatus.CHECK_RUNNING.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            // BS 已 SUCCESS → 不重复 writeStatement；IS/CF 仍调用
+            verify(statementWriter, never()).writeStatement(eq(task.getId()), eq("EXTRACT_BS"), any());
+            verify(statementWriter).writeStatement(task.getId(), "EXTRACT_IS", isResult);
+            verify(statementWriter).writeStatement(task.getId(), "EXTRACT_CF", cfResult);
+        }
+
+        @Test
+        @DisplayName("M2 review Blocker F: replay EXTRACT success 时补写缺失的 statement")
+        void shouldRewriteMissingStatementOnReplayedExtractSuccess() {
+            Task task = Task.builder()
+                    .id("task-blocker-f")
+                    .userId(1L)
+                    .status(TaskStatus.EXTRACT_SUCCESS.name())
+                    .build();
+            Report report = Report.builder()
+                    .id(21L)
+                    .taskId(task.getId())
+                    .pdfMd5("md5-blocker-f")
+                    .build();
+            // 3 个 EXTRACT step 都已 SUCCESS（重放场景）
+            TaskStep bs = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
+                    .status(StepStatus.SUCCESS.name()).build();
+            TaskStep is = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_IS")
+                    .status(StepStatus.SUCCESS.name()).build();
+            TaskStep cf = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_CF")
+                    .status(StepStatus.SUCCESS.name()).build();
+            TaskStep check = TaskStep.builder().taskId(task.getId()).stepName("CHECK")
+                    .status(StepStatus.PENDING.name()).build();
+
+            Map<String, Object> bsResult = Map.of("success", true, "statement", Map.of());
+            Map<String, Object> isResult = Map.of("success", true, "statement", Map.of());
+            Map<String, Object> cfResult = Map.of("success", true, "statement", Map.of());
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(bs));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS")).thenReturn(Mono.just(is));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_CF")).thenReturn(Mono.just(cf));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "CHECK")).thenReturn(Mono.just(check));
+            when(reportRepo.findByTaskId(task.getId())).thenReturn(Mono.just(report));
+            when(extractCacheService.lookup("md5-blocker-f", TaskStepName.EXTRACT_BS))
+                    .thenReturn(Mono.just(bsResult));
+            when(extractCacheService.lookup("md5-blocker-f", TaskStepName.EXTRACT_IS))
+                    .thenReturn(Mono.just(isResult));
+            when(extractCacheService.lookup("md5-blocker-f", TaskStepName.EXTRACT_CF))
+                    .thenReturn(Mono.just(cfResult));
+            when(statementWriter.ensureStatementWritten(anyString(), anyString(), any()))
+                    .thenReturn(Mono.just(5));
+
+            StepVerifier.create(orchestrator.handleStepProgress(
+                            task.getId(), "EXTRACT_BS", "SUCCESS", Map.of()))
+                    .assertNext(saved -> assertEquals(TaskStatus.CHECK_RUNNING.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            // 对 3 个 EXTRACT step 都调 ensureStatementWritten 补写
+            verify(statementWriter).ensureStatementWritten(task.getId(), "EXTRACT_BS", bsResult);
+            verify(statementWriter).ensureStatementWritten(task.getId(), "EXTRACT_IS", isResult);
+            verify(statementWriter).ensureStatementWritten(task.getId(), "EXTRACT_CF", cfResult);
+            // CHECK 被调度
+            verify(messageProducer).publishTaskStep(
+                    eq(task.getId()), eq("check"), any(Map.class), anyString());
+        }
     }
 }
