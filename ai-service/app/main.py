@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.api.health import router as health_router
+from app.api.models import router as models_router
 from app.api.parse import router as parse_router
 from app.core.config import Settings
 from app.core.exceptions import AiException
@@ -59,6 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.include_router(health_router)
     application.include_router(parse_router)
+    application.include_router(models_router)
     return application
 
 

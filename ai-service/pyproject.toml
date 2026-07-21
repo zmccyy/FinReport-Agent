@@ -29,6 +29,10 @@ prod = [
     "paddleocr>=2.7",        # PP-Structure 表格还原 + PaddleOCR 兜底
     "python-multipart>=0.0.6",  # /parse/upload 端点
     "httpx>=0.27",           # Async HTTP client
+    "torch>=2.3,<2.6",       # M2.04 ModelHub 推理后端（CUDA 12.1 wheel）
+    "transformers>=4.40",    # M2.04 LLM 加载（GPTQ / bitsandbytes 4-bit）
+    "accelerate>=0.30",      # M2.04 device_map="auto" + CPU offload
+    "bitsandbytes>=0.43",    # M2.04 nf4 量化（1.5B QLoRA 基座）
 ]
 dev = [
     "pytest>=8.0",
