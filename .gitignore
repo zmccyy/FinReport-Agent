@@ -38,6 +38,7 @@ env/
 target/
 .mvn/wrapper/maven-wrapper.jar
 !.mvn/wrapper/maven-wrapper.properties
+*.exec
 
 # --- Maven ---
 pom.xml.versionsBackup
