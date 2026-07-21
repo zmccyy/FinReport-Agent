@@ -154,6 +154,19 @@
             <artifactId>mysql</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- M2.12: real Redis via GenericContainer<redis:7.2-alpine> for
+             ExtractCacheService integration tests. No separate testcontainers:redis
+             module needed — GenericContainer from junit-jupiter is sufficient. -->
+        <!-- awaitility is transitively provided by spring-boot-starter-test. -->
+        <!-- JaCoCo offline runtime: required on classpath when classes are
+             instrumented via jacoco:instrument instead of -javaagent. -->
+        <dependency>
+            <groupId>org.jacoco</groupId>
+            <artifactId>org.jacoco.agent</artifactId>
+            <version>0.8.12</version>
+            <classifier>runtime</classifier>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -175,14 +188,29 @@
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <version>0.8.12</version>
                 <executions>
+                    <!--
+                        Offline instrumentation mode.
+                        Rationale: the workspace path contains a non-ASCII segment ('项目') and the
+                        local user folder contains an apostrophe ('Zm''CC''y''y'), which together
+                        break surefire's CommandLineUtils.translateCommandline when prepare-agent
+                        injects -javaagent into argLine. Switching to offline mode lets us avoid
+                        passing -javaagent at JVM start, while still collecting line coverage.
+                    -->
                     <execution>
-                        <id>prepare-agent</id>
+                        <id>default-instrument</id>
                         <goals>
-                            <goal>prepare-agent</goal>
+                            <goal>instrument</goal>
                         </goals>
                         <configuration>
-                            <!-- Keep the agent argument ASCII-only: Java on Windows can otherwise
-                                 mojibake a workspace path containing non-ASCII characters. -->
+                            <destFile>${jacoco.dataFile}</destFile>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>default-restore-instrumented-classes</id>
+                        <goals>
+                            <goal>restore-instrumented-classes</goal>
+                        </goals>
+                        <configuration>
                             <destFile>${jacoco.dataFile}</destFile>
                         </configuration>
                     </execution>
@@ -233,7 +261,28 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <argLine>"@{argLine}" -Djdk.net.URLClassPath.disableClassPathURLCheck=true</argLine>
+                    <!--
+                        No -javaagent is needed: jacoco-maven-plugin now instruments class files
+                        offline in target/classes before tests fork, and writes coverage data
+                        to destFile via the embedded runtime.
+
+                        forkCount=0 keeps tests in the Maven JVM: surefire's forked boot JAR
+                        passes the non-ASCII workspace path ('E:\项目\...') through GBK JNU
+                        decoding, which crashes the boot manifest ('other has different root').
+                        Running in-process sidesteps that entirely while still producing exec
+                        data, since offline instrumentation already baked the probes into the
+                        .class files.
+
+                        systemPropertyVariables propagate the JaCoCo runtime config to the
+                        Maven JVM (forkCount=0 means argLine is inert; system properties are
+                        still applied before test classes load).
+                    -->
+                    <forkCount>0</forkCount>
+                    <useManifestOnlyJar>false</useManifestOnlyJar>
+                    <systemPropertyVariables>
+                        <jacoco-agent.destfile>${jacoco.dataFile}</jacoco-agent.destfile>
+                        <jacoco-agent.output>file</jacoco-agent.output>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
             <plugin>
@@ -262,6 +311,14 @@
                         <include>**/*IT.java</include>
                     </includes>
                     <argLine>"@{argLine}" -Djdk.net.URLClassPath.disableClassPathURLCheck=true</argLine>
+                    <!--
+                        forkCount=0 keeps ITs in the Maven JVM: same Windows path-with-quote
+                        issue solved for surefire (see comment above). Without this, the
+                        forked VM boot JAR classpath contains Zm'CC'y'y which breaks
+                        CommandLineUtils.translateCommandline under GBK JNU encoding.
+                    -->
+                    <forkCount>0</forkCount>
+                    <useManifestOnlyJar>false</useManifestOnlyJar>
                 </configuration>
             </plugin>
         </plugins>
@@ -273,9 +330,12 @@
                 <os><family>Windows</family></os>
             </activation>
             <properties>
-                <!-- JaCoCo 0.8.x writes the agent destination with the process ANSI code page.
-                     Avoid a non-ASCII workspace path on Windows; reports are still generated in target/. -->
-                <jacoco.dataFile>C:/Users/Public/finreport-jacoco.exec</jacoco.dataFile>
+                <!-- JaCoCo 0.8.x writes the agent destination via the JVM native layer.
+                     Earlier we tried C:/Users/Public/... to dodge non-ASCII workspace paths,
+                     but the local sandbox now blocks writes outside the project tree.
+                     Revert to target/ and rely on -Djdk.net.URLClassPath.disableClassPathURLCheck=true
+                     (set on surefire below) to keep the boot classpath valid under GBK JNU encoding. -->
+                <jacoco.dataFile>${project.build.directory}/jacoco.exec</jacoco.dataFile>
             </properties>
         </profile>
         <profile>

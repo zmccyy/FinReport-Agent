@@ -1,0 +1,108 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://finreport.example/schemas/statement_schema.json",
+  "title": "FinancialStatement",
+  "description": "M7 抽取结果 JSON Schema（spec §2.3 M7）。由 app.schemas.statement.FinancialStatement.model_json_schema() 生成，作为 extractor 输出契约的权威声明；与 Pydantic 模型保持一致，重新生成命令：python -c \"import json; from app.schemas.statement import FinancialStatement; print(json.dumps(FinancialStatement.model_json_schema(), ensure_ascii=False, indent=2))\" > app/schemas/statement_schema.json",
+  "$defs": {
+    "Period": {
+      "description": "Reporting period tag for a statement row.",
+      "enum": [
+        "本期",
+        "上期",
+        "本年累计",
+        "上年同期"
+      ],
+      "title": "Period",
+      "type": "string"
+    },
+    "Scope": {
+      "description": "Consolidation scope for a statement row.",
+      "enum": [
+        "合并",
+        "母公司"
+      ],
+      "title": "Scope",
+      "type": "string"
+    },
+    "StatementItem": {
+      "description": "One row of a financial statement.",
+      "properties": {
+        "item": {
+          "description": "科目名称，如「货币资金」",
+          "minLength": 1,
+          "title": "Item",
+          "type": "string"
+        },
+        "value": {
+          "description": "数值，单位与 statement.unit 一致；允许负数",
+          "title": "Value",
+          "type": "number"
+        },
+        "scope": {
+          "$ref": "#/$defs/Scope",
+          "default": "合并",
+          "description": "合并 / 母公司"
+        },
+        "period": {
+          "$ref": "#/$defs/Period",
+          "default": "本期",
+          "description": "本期 / 上期 / 累计"
+        }
+      },
+      "required": [
+        "item",
+        "value"
+      ],
+      "title": "StatementItem",
+      "type": "object"
+    },
+    "StatementType": {
+      "description": "A-share annual-report statement categories.",
+      "enum": [
+        "balance_sheet",
+        "income_statement",
+        "cash_flow"
+      ],
+      "title": "StatementType",
+      "type": "string"
+    }
+  },
+  "properties": {
+    "report_period": {
+      "description": "报告期末日，YYYY-MM-DD，如 2024-12-31",
+      "minLength": 1,
+      "title": "Report Period",
+      "type": "string"
+    },
+    "currency": {
+      "default": "CNY",
+      "description": "币种 ISO 4217",
+      "title": "Currency",
+      "type": "string"
+    },
+    "unit": {
+      "default": "元",
+      "description": "数值单位：元 / 万元 / 百万元",
+      "title": "Unit",
+      "type": "string"
+    },
+    "statements": {
+      "additionalProperties": {
+        "items": {
+          "$ref": "#/$defs/StatementItem"
+        },
+        "type": "array"
+      },
+      "description": "按表类型分组的科目列表",
+      "propertyNames": {
+        "$ref": "#/$defs/StatementType"
+      },
+      "title": "Statements",
+      "type": "object"
+    }
+  },
+  "required": [
+    "report_period"
+  ],
+  "type": "object"
+}

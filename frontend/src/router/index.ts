@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/auth'
  * 路由（spec §6.5.1）。
  *
  * M1 范围：登录 / 财报列表 / 上传 / 解析进度。
- * 详情页三表、勾稽、异常、报告、问答等 Tab 在 M2+ 里程碑补齐。
+ * M2.11：新增 /reports/:id 详情页（Tab 结构，目前仅三表；勾稽/异常/报告/问答 Tab 在 M3 补齐）。
  */
 const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/reports' },
@@ -27,6 +27,12 @@ const routes: RouteRecordRaw[] = [
     name: 'ReportUpload',
     component: () => import('@/views/ReportUpload.vue'),
     meta: { title: '上传财报', requiresAuth: true },
+  },
+  {
+    path: '/reports/:reportId',
+    name: 'ReportDetail',
+    component: () => import('@/views/ReportDetail.vue'),
+    meta: { title: '财报详情', requiresAuth: true },
   },
   {
     path: '/tasks/:taskId/progress',

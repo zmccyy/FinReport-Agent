@@ -1,0 +1,109 @@
+{
+  "report_period": "2025-12-31",
+  "currency": "CNY",
+  "unit": "元",
+  "company_code": "000001",
+  "company_name": "平安银行",
+  "source_pdf": "000001_平安银行_2025年年度报告.pdf",
+  "page_count": 288,
+  "statements": {
+    "balance_sheet": [
+      {
+        "item": "资产总计",
+        "value": 4948396.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 27
+      },
+      {
+        "item": "负债合计",
+        "value": 5374593.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 117
+      },
+      {
+        "item": "股东权益合计",
+        "value": 494842.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 34
+      },
+      {
+        "item": "应收账款",
+        "value": 405442.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 38
+      },
+      {
+        "item": "固定资产",
+        "value": 11155.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 24
+      }
+    ],
+    "income_statement": [
+      {
+        "item": "营业收入",
+        "value": 1314.42,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 6
+      },
+      {
+        "item": "营业利润",
+        "value": 91975.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 17
+      },
+      {
+        "item": "利润总额",
+        "value": 51159.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 17
+      },
+      {
+        "item": "净利润",
+        "value": 426.33,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 6
+      },
+      {
+        "item": "归属于母公司股东的净利润",
+        "value": 42633.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 136
+      }
+    ],
+    "cash_flow": [
+      {
+        "item": "经营活动产生的现金流量净额",
+        "value": 315858.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 18
+      },
+      {
+        "item": "投资活动产生的现金流量净额",
+        "value": 790.36,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 36
+      },
+      {
+        "item": "筹资活动产生的现金流量净额",
+        "value": 1492.36,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 36
+      }
+    ]
+  },
+  "notes": "Auto-extracted sample; manually verify before using for real F1 evaluation."
+}

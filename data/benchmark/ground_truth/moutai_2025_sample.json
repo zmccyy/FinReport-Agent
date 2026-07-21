@@ -1,0 +1,30 @@
+{
+  "report_id": "600519_moutai_2025",
+  "company_code": "600519",
+  "company_name": "贵州茅台",
+  "report_period": "2025-12-31",
+  "currency": "CNY",
+  "unit": "元",
+  "source_pdf": "data/sample_reports/600519_贵州茅台_2025年年度报告.pdf",
+  "statements": {
+    "balance_sheet": [
+      {"item": "货币资金", "value": 59000000000.0, "scope": "合并", "period": "本期", "notes": "近似值，真实数据需人工核对"},
+      {"item": "资产总计", "value": 280000000000.0, "scope": "合并", "period": "本期", "notes": "近似值"},
+      {"item": "负债合计", "value": 60000000000.0, "scope": "合并", "period": "本期", "notes": "近似值"},
+      {"item": "所有者权益合计", "value": 220000000000.0, "scope": "合并", "period": "本期", "notes": "近似值"}
+    ],
+    "income_statement": [
+      {"item": "营业收入", "value": 170000000000.0, "scope": "合并", "period": "本期", "notes": "近似值"},
+      {"item": "净利润", "value": 85000000000.0, "scope": "合并", "period": "本期", "notes": "近似值"}
+    ],
+    "cash_flow": [
+      {"item": "经营活动产生的现金流量净额", "value": 90000000000.0, "scope": "合并", "period": "本期", "notes": "近似值"}
+    ]
+  },
+  "annotation_metadata": {
+    "annotator": "M2.12 sample",
+    "annotated_at": "2026-07-21",
+    "confidence": "low",
+    "note": "这是 F1 评估脚本的最小可运行样本；真实评估需要人工对照原文逐项标注。数值来自公开年报近似值（量级），不用于精确比对。"
+  }
+}

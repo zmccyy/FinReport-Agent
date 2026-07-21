@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -27,14 +28,18 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.r2dbc.core.DatabaseClient;
 import org.springframework.transaction.reactive.TransactionalOperator;
 
+import com.finreport.domain.entity.Report;
 import com.finreport.domain.entity.Task;
 import com.finreport.domain.entity.TaskStep;
 import com.finreport.domain.enums.StepStatus;
 import com.finreport.domain.enums.TaskStatus;
+import com.finreport.domain.enums.TaskStepName;
 import com.finreport.exception.IntegrationException;
 import com.finreport.mq.TaskMessageProducer;
+import com.finreport.repository.ReportRepository;
 import com.finreport.repository.TaskRepository;
 import com.finreport.repository.TaskStepRepository;
+import com.finreport.service.statement.StatementWriter;
 import com.finreport.trace.TraceContext;
 
 import reactor.core.publisher.Mono;
@@ -65,6 +70,21 @@ class TaskOrchestratorTest {
     @Mock
     private TransactionalOperator transactionalOperator;
 
+    @Mock
+    private ExtractDispatcher extractDispatcher;
+
+    @Mock
+    private ExtractCompletionTracker extractTracker;
+
+    @Mock
+    private StatementWriter statementWriter;
+
+    @Mock
+    private ExtractCacheService extractCacheService;
+
+    @Mock
+    private ReportRepository reportRepo;
+
     private TaskStateMachine stateMachine;
     private TaskOrchestrator orchestrator;
 
@@ -72,7 +92,16 @@ class TaskOrchestratorTest {
     void setUp() {
         stateMachine = new TaskStateMachine();
         orchestrator = new TaskOrchestrator(
-                taskRepo, stepRepo, stateMachine, messageProducer, databaseClient, transactionalOperator);
+                taskRepo, stepRepo, stateMachine, messageProducer, databaseClient, transactionalOperator,
+                extractDispatcher, extractTracker, statementWriter, extractCacheService, reportRepo);
+        // M2.09: StatementWriter returns 0 by default; individual tests override when needed.
+        lenient().when(statementWriter.writeStatement(anyString(), anyString(), any()))
+                .thenReturn(Mono.just(0));
+        // M2.10: Cache miss by default; individual tests override for cache-hit scenarios.
+        lenient().when(reportRepo.findByTaskId(anyString())).thenReturn(Mono.empty());
+        lenient().when(extractCacheService.lookupAll(anyString())).thenReturn(Mono.just(java.util.Map.of()));
+        lenient().when(extractCacheService.store(anyString(), any(TaskStepName.class), any()))
+                .thenReturn(Mono.empty());
     }
 
     @Nested
@@ -328,34 +357,20 @@ class TaskOrchestratorTest {
                     .build();
             TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
                     .status(StepStatus.SUCCESS.name()).build();
-            TaskStep balanceSheet = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
-                    .status(StepStatus.PENDING.name()).build();
-            TaskStep incomeStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_IS")
-                    .status(StepStatus.PENDING.name()).build();
-            TaskStep cashFlowStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_CF")
-                    .status(StepStatus.PENDING.name()).build();
 
             when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
             when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
-            when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
             when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
-            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(balanceSheet));
-            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS")).thenReturn(Mono.just(incomeStatement));
-            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_CF")).thenReturn(Mono.just(cashFlowStatement));
+            // M2.08: extraction dispatch delegated to ExtractDispatcher
+            when(extractDispatcher.dispatchAll(any(Task.class), any(Map.class))).thenReturn(Mono.empty());
 
             StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of()))
                     .assertNext(saved -> assertEquals(TaskStatus.EXTRACT_RUNNING.name(), saved.getStatus()))
                     .verifyComplete();
 
-            assertEquals(StepStatus.RUNNING.name(), balanceSheet.getStatus());
-            assertEquals(StepStatus.RUNNING.name(), incomeStatement.getStatus());
-            assertEquals(StepStatus.RUNNING.name(), cashFlowStatement.getStatus());
-            verify(messageProducer).publishTaskStep(
-                    task.getId(), "extract.bs", Map.of("pdfObjectKey", "uploads/replay.pdf"), "");
-            verify(messageProducer).publishTaskStep(
-                    task.getId(), "extract.is", Map.of("pdfObjectKey", "uploads/replay.pdf"), "");
-            verify(messageProducer).publishTaskStep(
-                    task.getId(), "extract.cf", Map.of("pdfObjectKey", "uploads/replay.pdf"), "");
+            verify(extractDispatcher).dispatchAll(any(Task.class), any(Map.class));
+            verify(messageProducer, never()).publishTaskStep(
+                    anyString(), anyString(), any(Map.class), anyString());
         }
 
         @Test
@@ -543,21 +558,13 @@ class TaskOrchestratorTest {
                     .build();
             TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
                     .status(StepStatus.RUNNING.name()).build();
-            TaskStep balanceSheet = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
-                    .status(StepStatus.PENDING.name()).build();
-            TaskStep incomeStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_IS")
-                    .status(StepStatus.PENDING.name()).build();
-            TaskStep cashFlowStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_CF")
-                    .status(StepStatus.PENDING.name()).build();
-            Map<String, Object> payload = Map.of("pdfObjectKey", "uploads/7/report.pdf");
 
             when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
             when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
             when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
             when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
-            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(balanceSheet));
-            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS")).thenReturn(Mono.just(incomeStatement));
-            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_CF")).thenReturn(Mono.just(cashFlowStatement));
+            // M2.08: extraction dispatch delegated to ExtractDispatcher
+            when(extractDispatcher.dispatchAll(any(Task.class), any(Map.class))).thenReturn(Mono.empty());
 
             StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of())
                             .contextWrite(context -> context.put(TraceContext.TRACE_ID, "parallel-trace")))
@@ -567,20 +574,15 @@ class TaskOrchestratorTest {
                     })
                     .verifyComplete();
 
-            assertEquals(StepStatus.RUNNING.name(), balanceSheet.getStatus());
-            assertEquals(StepStatus.RUNNING.name(), incomeStatement.getStatus());
-            assertEquals(StepStatus.RUNNING.name(), cashFlowStatement.getStatus());
-            verify(messageProducer).publishTaskStep(
-                    task.getId(), "extract.bs", payload, "parallel-trace");
-            verify(messageProducer).publishTaskStep(
-                    task.getId(), "extract.is", payload, "parallel-trace");
-            verify(messageProducer).publishTaskStep(
-                    task.getId(), "extract.cf", payload, "parallel-trace");
+            verify(extractDispatcher).dispatchAll(any(Task.class), any(Map.class));
+            // TaskOrchestrator no longer publishes extract messages directly (delegated to ExtractDispatcher)
+            verify(messageProducer, never()).publishTaskStep(
+                    eq(task.getId()), eq("extract.bs"), any(Map.class), anyString());
         }
 
         @Test
-        @DisplayName("should mark the task failed when an extraction message cannot be published")
-        void shouldMarkTaskFailedWhenExtractionMessageCannotBePublished() {
+        @DisplayName("should propagate IntegrationException when extract dispatch fails")
+        void shouldPropagateIntegrationExceptionWhenExtractDispatchFails() {
             Task task = Task.builder()
                     .id("task-extraction-publish-failure")
                     .status(TaskStatus.PARSE_RUNNING.name())
@@ -588,28 +590,17 @@ class TaskOrchestratorTest {
                     .build();
             TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
                     .status(StepStatus.RUNNING.name()).build();
-            TaskStep balanceSheet = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
-                    .status(StepStatus.PENDING.name()).build();
-            TaskStep incomeStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_IS")
-                    .status(StepStatus.PENDING.name()).build();
-            TaskStep cashFlowStatement = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_CF")
-                    .status(StepStatus.PENDING.name()).build();
+            IntegrationException mqError = new IntegrationException(
+                    org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+                    "MQ_PUBLISH_FAILED", "RabbitMQ is unavailable");
 
             when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
             when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
             when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
             when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
-            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(balanceSheet));
-            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS")).thenReturn(Mono.just(incomeStatement));
-            doAnswer(invocation -> {
-                if ("extract.is".equals(invocation.getArgument(1))) {
-                    throw new IntegrationException(
-                            org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
-                            "MQ_PUBLISH_FAILED", "RabbitMQ is unavailable");
-                }
-                return null;
-            }).when(messageProducer).publishTaskStep(
-                    eq(task.getId()), anyString(), any(Map.class), eq("failure-trace"));
+            // M2.08: ExtractDispatcher internally handles MQ failure via markDispatchFailed;
+            // TaskOrchestrator just propagates the IntegrationException.
+            when(extractDispatcher.dispatchAll(any(Task.class), any(Map.class))).thenReturn(Mono.error(mqError));
 
             StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of())
                             .contextWrite(context -> context.put(TraceContext.TRACE_ID, "failure-trace")))
@@ -617,12 +608,10 @@ class TaskOrchestratorTest {
                             && "MQ_PUBLISH_FAILED".equals(integrationException.getErrorCode()))
                     .verify();
 
-            assertEquals(TaskStatus.FAILED.name(), task.getStatus());
-            assertEquals(StepStatus.RUNNING.name(), balanceSheet.getStatus());
-            assertEquals(StepStatus.FAILED.name(), incomeStatement.getStatus());
-            assertEquals(StepStatus.PENDING.name(), cashFlowStatement.getStatus());
-            verify(messageProducer, never()).publishTaskStep(
-                    task.getId(), "extract.cf", Map.of("pdfObjectKey", "uploads/7/report.pdf"), "failure-trace");
+            // task transitioned to EXTRACT_RUNNING before dispatcher failed;
+            // FAILED transition is dispatched inside ExtractDispatcher (covered by ExtractDispatcherTest)
+            assertEquals(TaskStatus.EXTRACT_RUNNING.name(), task.getStatus());
+            verify(extractDispatcher).dispatchAll(any(Task.class), any(Map.class));
         }
 
         @Test
@@ -634,13 +623,48 @@ class TaskOrchestratorTest {
             when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
             when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(bs));
             when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS")).thenReturn(Mono.empty());
+            // Flux.all 在 IS 处短路（BS 已 SUCCESS, IS 空 → MISSING → predicate false），
+            // CF 的 stub 可能未被订阅 → 用 lenient 避免 UnnecessaryStubbing 报错。
+            lenient().when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_CF"))
+                    .thenReturn(Mono.empty());
             when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
             when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            // M2.08: Redis hot path returns count < EXPECTED_COUNT so we fall back to MySQL reconcile
+            when(extractTracker.recordSuccess(eq(task.getId()), any(TaskStepName.class))).thenReturn(Mono.just(1));
+            when(extractTracker.hasFailed(task.getId())).thenReturn(Mono.just(false));
 
             StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "EXTRACT_BS", "SUCCESS", Map.of()))
                     .assertNext(saved -> assertEquals(TaskStatus.EXTRACT_PARTIAL.name(), saved.getStatus()))
                     .verifyComplete();
             verify(messageProducer, never()).publishTaskStep(anyString(), anyString(), any(Map.class), anyString());
+            verify(extractDispatcher, never()).dispatchAll(any(Task.class), any(Map.class));
+        }
+
+        @Test
+        @DisplayName("should transition to EXTRACT_SUCCESS via Redis hot path when third extract succeeds")
+        void shouldTransitionToExtractSuccessViaRedisHotPathWhenThirdExtractSucceeds() {
+            Task task = Task.builder().id("task-extract-third").status(TaskStatus.EXTRACT_RUNNING.name()).build();
+            TaskStep cf = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_CF")
+                    .status(StepStatus.RUNNING.name()).build();
+            TaskStep check = TaskStep.builder().taskId(task.getId()).stepName("CHECK")
+                    .status(StepStatus.PENDING.name()).build();
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_CF")).thenReturn(Mono.just(cf));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "CHECK")).thenReturn(Mono.just(check));
+            // M2.08: Redis hot path returns count == EXPECTED_COUNT and no failed flag
+            when(extractTracker.recordSuccess(eq(task.getId()), any(TaskStepName.class))).thenReturn(Mono.just(3));
+            when(extractTracker.hasFailed(task.getId())).thenReturn(Mono.just(false));
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "EXTRACT_CF", "SUCCESS", Map.of()))
+                    .assertNext(saved -> assertEquals(TaskStatus.CHECK_RUNNING.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            // CHECK dispatched via dispatchStep (which calls messageProducer.publishTaskStep directly)
+            verify(messageProducer).publishTaskStep(
+                    eq(task.getId()), eq("check"), any(Map.class), anyString());
         }
     }
 
@@ -656,6 +680,226 @@ class TaskOrchestratorTest {
             assertEquals("FAILED", TaskStatus.FAILED.name());
             assertEquals("CANCELLED", TaskStatus.CANCELLED.name());
             assertEquals("EXTRACT_PARTIAL", TaskStatus.EXTRACT_PARTIAL.name());
+        }
+    }
+
+    @Nested
+    @DisplayName("M2.10 extraction cache")
+    class ExtractionCache {
+
+        @Test
+        @DisplayName("should skip extract MQ and replay cached results when all 3 cached")
+        void shouldSkipExtractAndReplayWhenAllCached() {
+            // setup: task in PARSE_RUNNING, report has pdfMd5, cache has 3 entries
+            Task task = Task.builder()
+                    .id("task-cache-hit")
+                    .userId(1L)
+                    .status(TaskStatus.PARSE_RUNNING.name())
+                    .payload("{\"pdfObjectKey\":\"uploads/test.pdf\"}")
+                    .build();
+            Report report = Report.builder()
+                    .id(10L)
+                    .taskId(task.getId())
+                    .pdfMd5("md5-cache-hit")
+                    .build();
+            TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
+                    .status(StepStatus.RUNNING.name()).build();
+            TaskStep bs = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
+                    .status(StepStatus.PENDING.name()).build();
+            TaskStep is = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_IS")
+                    .status(StepStatus.PENDING.name()).build();
+            TaskStep cf = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_CF")
+                    .status(StepStatus.PENDING.name()).build();
+            TaskStep check = TaskStep.builder().taskId(task.getId()).stepName("CHECK")
+                    .status(StepStatus.PENDING.name()).build();
+
+            Map<String, Object> bsResult = Map.of("success", true, "statement", Map.of());
+            Map<String, Object> isResult = Map.of("success", true, "statement", Map.of());
+            Map<String, Object> cfResult = Map.of("success", true, "statement", Map.of());
+            Map<TaskStepName, Map<String, Object>> cached = Map.of(
+                    TaskStepName.EXTRACT_BS, bsResult,
+                    TaskStepName.EXTRACT_IS, isResult,
+                    TaskStepName.EXTRACT_CF, cfResult);
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(bs));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS")).thenReturn(Mono.just(is));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_CF")).thenReturn(Mono.just(cf));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "CHECK")).thenReturn(Mono.just(check));
+            when(reportRepo.findByTaskId(task.getId())).thenReturn(Mono.just(report));
+            when(extractCacheService.lookupAll("md5-cache-hit")).thenReturn(Mono.just(cached));
+            when(statementWriter.writeStatement(anyString(), anyString(), any())).thenReturn(Mono.just(5));
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of())
+                            .contextWrite(ctx -> ctx.put(TraceContext.TRACE_ID, "cache-trace")))
+                    .assertNext(saved -> assertEquals(TaskStatus.CHECK_RUNNING.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            // No extract MQ dispatched
+            verify(messageProducer, never()).publishTaskStep(
+                    eq(task.getId()), eq("extract.bs"), any(Map.class), anyString());
+            verify(messageProducer, never()).publishTaskStep(
+                    eq(task.getId()), eq("extract.is"), any(Map.class), anyString());
+            verify(messageProducer, never()).publishTaskStep(
+                    eq(task.getId()), eq("extract.cf"), any(Map.class), anyString());
+            // No extract dispatch (cache hit)
+            verify(extractDispatcher, never()).dispatchAll(any(Task.class), any(Map.class));
+            // CHECK dispatched
+            verify(messageProducer).publishTaskStep(
+                    eq(task.getId()), eq("check"), any(Map.class), anyString());
+            // All 3 statements written
+            verify(statementWriter).writeStatement(task.getId(), "EXTRACT_BS", bsResult);
+            verify(statementWriter).writeStatement(task.getId(), "EXTRACT_IS", isResult);
+            verify(statementWriter).writeStatement(task.getId(), "EXTRACT_CF", cfResult);
+            // All 3 steps marked SUCCESS
+            assertEquals(StepStatus.SUCCESS.name(), bs.getStatus());
+            assertEquals(StepStatus.SUCCESS.name(), is.getStatus());
+            assertEquals(StepStatus.SUCCESS.name(), cf.getStatus());
+        }
+
+        @Test
+        @DisplayName("should fall through to extract dispatch when cache miss")
+        void shouldFallThroughToExtractDispatchWhenCacheMiss() {
+            Task task = Task.builder()
+                    .id("task-cache-miss")
+                    .userId(1L)
+                    .status(TaskStatus.PARSE_RUNNING.name())
+                    .payload("{\"pdfObjectKey\":\"uploads/test.pdf\"}")
+                    .build();
+            Report report = Report.builder()
+                    .id(11L)
+                    .taskId(task.getId())
+                    .pdfMd5("md5-cache-miss")
+                    .build();
+            TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
+                    .status(StepStatus.RUNNING.name()).build();
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
+            when(reportRepo.findByTaskId(task.getId())).thenReturn(Mono.just(report));
+            // Cache miss: empty Map
+            when(extractCacheService.lookupAll("md5-cache-miss")).thenReturn(Mono.just(Map.of()));
+            when(extractDispatcher.dispatchAll(any(Task.class), any(Map.class))).thenReturn(Mono.empty());
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of())
+                            .contextWrite(ctx -> ctx.put(TraceContext.TRACE_ID, "miss-trace")))
+                    .assertNext(saved -> assertEquals(TaskStatus.EXTRACT_RUNNING.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            verify(extractDispatcher).dispatchAll(any(Task.class), any(Map.class));
+        }
+
+        @Test
+        @DisplayName("should fall through to extract dispatch when only partial cache hit")
+        void shouldFallThroughToExtractDispatchWhenPartialCacheHit() {
+            Task task = Task.builder()
+                    .id("task-partial-cache")
+                    .userId(1L)
+                    .status(TaskStatus.PARSE_RUNNING.name())
+                    .payload("{\"pdfObjectKey\":\"uploads/test.pdf\"}")
+                    .build();
+            Report report = Report.builder()
+                    .id(12L)
+                    .taskId(task.getId())
+                    .pdfMd5("md5-partial")
+                    .build();
+            TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
+                    .status(StepStatus.RUNNING.name()).build();
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
+            when(reportRepo.findByTaskId(task.getId())).thenReturn(Mono.just(report));
+            // Partial: only BS cached
+            when(extractCacheService.lookupAll("md5-partial")).thenReturn(Mono.just(
+                    Map.of(TaskStepName.EXTRACT_BS, Map.of("success", true))));
+            when(extractDispatcher.dispatchAll(any(Task.class), any(Map.class))).thenReturn(Mono.empty());
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of())
+                            .contextWrite(ctx -> ctx.put(TraceContext.TRACE_ID, "partial-trace")))
+                    .assertNext(saved -> assertEquals(TaskStatus.EXTRACT_RUNNING.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            verify(extractDispatcher).dispatchAll(any(Task.class), any(Map.class));
+        }
+
+        @Test
+        @DisplayName("should fall through to extract dispatch when report not found")
+        void shouldFallThroughToExtractDispatchWhenReportNotFound() {
+            Task task = Task.builder()
+                    .id("task-no-report")
+                    .userId(1L)
+                    .status(TaskStatus.PARSE_RUNNING.name())
+                    .payload("{\"pdfObjectKey\":\"uploads/test.pdf\"}")
+                    .build();
+            TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
+                    .status(StepStatus.RUNNING.name()).build();
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
+            // Report lookup returns empty (lenient default)
+            when(extractDispatcher.dispatchAll(any(Task.class), any(Map.class))).thenReturn(Mono.empty());
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of())
+                            .contextWrite(ctx -> ctx.put(TraceContext.TRACE_ID, "no-report-trace")))
+                    .assertNext(saved -> assertEquals(TaskStatus.EXTRACT_RUNNING.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            verify(extractCacheService, never()).lookupAll(anyString());
+            verify(extractDispatcher).dispatchAll(any(Task.class), any(Map.class));
+        }
+
+        @Test
+        @DisplayName("should store extract result to cache after writeStatement on EXTRACT success")
+        void shouldStoreExtractResultToCacheAfterWriteStatementOnExtractSuccess() {
+            Task task = Task.builder()
+                    .id("task-store-cache")
+                    .userId(1L)
+                    .status(TaskStatus.EXTRACT_RUNNING.name())
+                    .build();
+            Report report = Report.builder()
+                    .id(13L)
+                    .taskId(task.getId())
+                    .pdfMd5("md5-store")
+                    .build();
+            TaskStep bs = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
+                    .status(StepStatus.RUNNING.name()).build();
+
+            Map<String, Object> result = Map.of("success", true, "statement", Map.of());
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(bs));
+            // IS/CF not yet SUCCESS → Flux.all short-circuits
+            lenient().when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS"))
+                    .thenReturn(Mono.empty());
+            lenient().when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_CF"))
+                    .thenReturn(Mono.empty());
+            when(extractTracker.recordSuccess(eq(task.getId()), any(TaskStepName.class)))
+                    .thenReturn(Mono.just(1));
+            when(extractTracker.hasFailed(task.getId())).thenReturn(Mono.just(false));
+            when(statementWriter.writeStatement(task.getId(), "EXTRACT_BS", result))
+                    .thenReturn(Mono.just(5));
+            when(reportRepo.findByTaskId(task.getId())).thenReturn(Mono.just(report));
+            when(extractCacheService.store("md5-store", TaskStepName.EXTRACT_BS, result))
+                    .thenReturn(Mono.empty());
+
+            StepVerifier.create(orchestrator.handleStepProgress(
+                            task.getId(), "EXTRACT_BS", "SUCCESS", result))
+                    .assertNext(saved -> assertEquals(TaskStatus.EXTRACT_PARTIAL.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            // Cache store called with resolved pdfMd5 + step + result
+            verify(extractCacheService).store("md5-store", TaskStepName.EXTRACT_BS, result);
         }
     }
 }

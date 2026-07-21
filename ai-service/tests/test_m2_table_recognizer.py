@@ -221,6 +221,67 @@ def test_ppstructurev3_engine_skips_regions_without_html() -> None:
     assert engine(b"PNG") == []
 
 
+def test_ppstructurev3_engine_maps_layout_bbox_real_shape() -> None:
+    """Real PPStructureV3 puts bbox on layout_det_res boxes, not on entries.
+
+    Mirrors paddlex LayoutParsingResultV2: table_res_list entries only carry
+    pred_html; the table bbox lives in layout_det_res['boxes'][i]['coordinate']
+    for boxes whose label contains 'table', in the same order as table_res_list.
+    """
+    from app.modules.parser.table_recognizer import _PPStructureV3Engine
+
+    class _Layout:
+        boxes = [
+            {"label": "text", "coordinate": [0, 0, 10, 10]},
+            {"label": "table", "coordinate": [11, 22, 111, 88]},
+            {"label": "figure", "coordinate": [5, 5, 50, 50]},
+            {"label": "table", "coordinate": [200, 300, 400, 500]},
+        ]
+
+    class _Page:
+        layout_det_res = _Layout()
+        table_res_list = [
+            {"pred_html": "<table><tr><td>A</td></tr></table>"},
+            {"pred_html": "<table><tr><td>B</td></tr></table>"},
+        ]
+
+    class _StubPPV3:
+        def predict(self, image: bytes) -> list:
+            """Yield the page-level result."""
+            del image
+            return [_Page()]
+
+    engine = _PPStructureV3Engine(_StubPPV3())
+    regions = engine(b"PNG")
+
+    assert len(regions) == 2
+    assert regions[0]["bbox"] == [11.0, 22.0, 111.0, 88.0]
+    assert regions[1]["bbox"] == [200.0, 300.0, 400.0, 500.0]
+    assert "A" in regions[0]["res"]["html"]
+    assert "B" in regions[1]["res"]["html"]
+
+
+def test_ppstructurev3_engine_drops_table_without_layout_bbox() -> None:
+    """An entry with html but no matching layout table box is dropped."""
+    from app.modules.parser.table_recognizer import _PPStructureV3Engine
+
+    class _Layout:
+        boxes = [{"label": "text", "coordinate": [0, 0, 10, 10]}]
+
+    class _Page:
+        layout_det_res = _Layout()
+        table_res_list = [{"pred_html": "<table></table>"}]
+
+    class _StubPPV3:
+        def predict(self, image: bytes) -> list:
+            """Yield the page-level result."""
+            del image
+            return [_Page()]
+
+    engine = _PPStructureV3Engine(_StubPPV3())
+    assert engine(b"PNG") == []
+
+
 def test_ensure_engine_falls_back_to_legacy_ppstructure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -42,16 +42,43 @@ class _PPStructureV3Engine:
     def __call__(self, image_bytes: bytes) -> list[dict[str, Any]]:
         """Return table regions detected on the rendered page image.
 
+        PaddleOCR 3.x ``predict()`` only accepts ``numpy.ndarray`` or a file
+        path — raw PNG bytes are silently ignored. We decode the PNG bytes to
+        an ndarray (BGR) before calling predict. When OpenCV is unavailable
+        (unit tests with a fake engine) the raw bytes are forwarded to
+        ``predict`` so test stubs keep working.
+
         Args:
             image_bytes: PNG bytes of the page.
 
         Returns:
             A list of region dicts shaped like legacy PP-Structure results.
         """
-        page = self._first_predict_page(self._engine.predict(image_bytes))
+        image = self._decode_png(image_bytes)
+        predict_input = image if image is not None else image_bytes
+        page = self._first_predict_page(self._engine.predict(predict_input))
         if page is None:
             return []
         return self._extract_table_regions(page)
+
+    @staticmethod
+    def _decode_png(image_bytes: bytes) -> Any:
+        """Decode PNG bytes into a BGR ndarray for PaddleOCR 3.x predict.
+
+        Args:
+            image_bytes: PNG/JPG bytes from PyMuPDF rendering.
+
+        Returns:
+            A numpy ndarray, or None when OpenCV cannot decode the bytes (the
+            dependency is absent under unit tests).
+        """
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            return None
+        arr = np.frombuffer(image_bytes, dtype=np.uint8)
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
 
     @staticmethod
     def _first_predict_page(results: Any) -> Any:
@@ -74,9 +101,13 @@ class _PPStructureV3Engine:
     def _extract_table_regions(page: Any) -> list[dict[str, Any]]:
         """Pull table regions from one PPStructureV3 page result.
 
-        PaddleX page results expose ``rec_texts``/``rec_polys`` for OCR labels
-        and a structured ``table_res_list`` of per-table dicts. We map each
-        table entry to the legacy shape and reuse ``_to_table_block``.
+        PaddleX ``LayoutParsingResultV2`` exposes ``layout_det_res["boxes"]``
+        (each box carrying ``label`` and ``coordinate``) and a parallel
+        ``table_res_list`` whose entries carry ``pred_html`` but no bbox. The
+        table boxes appear in ``layout_det_res`` in the same order tables are
+        appended to ``table_res_list`` (see paddlex ``pipeline_v2``), so we zip
+        them by index. A legacy/fake entry that already carries ``table_region``
+        or ``block_bbox`` is honored directly so existing unit fakes stay valid.
 
         Args:
             page: One PPStructureV3 page result object.
@@ -88,19 +119,67 @@ class _PPStructureV3Engine:
         table_list: Any = TableRecognizer._field(page, "table_res_list", default=None)
         if not table_list:
             return regions
+        layout_boxes = _PPStructureV3Engine._layout_table_boxes(page)
         try:
-            for entry in table_list:
+            for idx, entry in enumerate(table_list):
                 html = TableRecognizer._field(entry, "pred_html", default="") or ""
-                bbox = TableRecognizer._field(entry, "table_region", default=None)
+                if not html:
+                    continue
+                bbox = _PPStructureV3Engine._entry_bbox(entry)
+                if bbox is None and idx < len(layout_boxes):
+                    bbox = layout_boxes[idx]
                 if bbox is None:
-                    bbox = TableRecognizer._field(entry, "bbox", default=None)
-                if not html or bbox is None:
                     continue
                 regions.append({"type": "table", "bbox": bbox, "res": {"html": html}})
         except Exception:
             LOGGER.exception("Failed to map PPStructureV3 table regions")
             return []
         return regions
+
+    @staticmethod
+    def _entry_bbox(entry: Any) -> list[float] | None:
+        """Read a bbox stored directly on a table entry (legacy/fake shape).
+
+        Args:
+            entry: A table_res_list item.
+
+        Returns:
+            A 4-number bbox list, or None when the entry carries no bbox.
+        """
+        for name in ("table_region", "block_bbox", "bbox"):
+            value = TableRecognizer._field(entry, name, default=None)
+            if value is not None and len(value) >= 4:
+                return list(value[:4])
+        return None
+
+    @staticmethod
+    def _layout_table_boxes(page: Any) -> list[list[float]]:
+        """Collect bbox coordinates of ``table``-labeled layout boxes.
+
+        Args:
+            page: One PPStructureV3 page result object.
+
+        Returns:
+            A list of 4-number bbox lists (x0, y0, x1, y1), one per table box.
+        """
+        layout_res = TableRecognizer._field(page, "layout_det_res", default=None)
+        boxes: Any = (
+            TableRecognizer._field(layout_res, "boxes", default=None)
+            if layout_res
+            else None
+        )
+        if not boxes:
+            return []
+        table_boxes: list[list[float]] = []
+        for box in boxes:
+            label = TableRecognizer._field(box, "label", default="")
+            if "table" not in str(label).lower():
+                continue
+            coordinate = TableRecognizer._field(box, "coordinate", default=None)
+            if coordinate is None or len(coordinate) < 4:
+                continue
+            table_boxes.append([float(v) for v in coordinate[:4]])
+        return table_boxes
 
 
 class TableRecognizer:

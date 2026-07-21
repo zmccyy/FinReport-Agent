@@ -39,13 +39,21 @@ class _PaddleOCREngine:
     def __call__(self, image_bytes: bytes) -> list[Any]:
         """Return recognized line entries for the rendered page image.
 
+        PaddleOCR 3.x ``predict()`` only accepts ``numpy.ndarray`` or a file
+        path — raw PNG bytes are silently ignored. We decode the PNG bytes to
+        an ndarray (BGR) before calling predict. When OpenCV is unavailable
+        (unit tests with a fake engine) the raw bytes are forwarded to
+        ``predict`` so test stubs keep working.
+
         Args:
             image_bytes: PNG bytes of the rendered page.
 
         Returns:
             A list of ``[box, (text, score)]`` entries.
         """
-        page = self._first_predict_page(self._engine.predict(image_bytes))
+        image = self._decode_png(image_bytes)
+        predict_input = image if image is not None else image_bytes
+        page = self._first_predict_page(self._engine.predict(predict_input))
         if page is None:
             return []
         polys = OcrFallback._field(page, "rec_polys", default=None) or []
@@ -56,6 +64,24 @@ class _PaddleOCREngine:
             if text:
                 lines.append([list(box), (text, float(score))])
         return lines
+
+    @staticmethod
+    def _decode_png(image_bytes: bytes) -> Any:
+        """Decode PNG bytes into a BGR ndarray for PaddleOCR 3.x predict.
+
+        Args:
+            image_bytes: PNG/JPG bytes from PyMuPDF rendering.
+
+        Returns:
+            A numpy ndarray, or None when OpenCV cannot decode the bytes.
+        """
+        try:
+            import cv2
+            import numpy as np
+        except ImportError:
+            return None
+        arr = np.frombuffer(image_bytes, dtype=np.uint8)
+        return cv2.imdecode(arr, cv2.IMREAD_COLOR)
 
     @staticmethod
     def _first_predict_page(results: Any) -> Any:

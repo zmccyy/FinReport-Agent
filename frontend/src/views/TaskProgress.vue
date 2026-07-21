@@ -42,6 +42,18 @@ watch(
 
 const isRunning = computed(() => task.taskStatus === 'RUNNING' || task.taskStatus === 'PENDING')
 
+const canViewStatements = computed(() =>
+  task.taskStatus === 'COMPLETED' && task.reportId != null
+)
+
+function viewStatements(): void {
+  if (task.reportId == null) {
+    ElMessage.warning('报告 ID 尚未就绪')
+    return
+  }
+  router.push({ name: 'ReportDetail', params: { reportId: task.reportId } })
+}
+
 async function handleCancel(): Promise<void> {
   try {
     await ElMessageBox.confirm('确定取消该解析任务吗？', '取消任务', {
@@ -84,7 +96,10 @@ function goUpload(): void {
 
       <ProgressCard class="fin-fade-up">
         <template #done-action>
-          <el-button type="primary" plain @click="goReports">返回列表</el-button>
+          <el-button type="primary" :disabled="!canViewStatements" @click="viewStatements">
+            查看三表
+          </el-button>
+          <el-button plain @click="goReports">返回列表</el-button>
         </template>
       </ProgressCard>
 
