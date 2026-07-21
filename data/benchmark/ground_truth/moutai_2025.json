@@ -1,0 +1,137 @@
+{
+  "report_period": "2025-12-31",
+  "currency": "CNY",
+  "unit": "元",
+  "company_code": "600519",
+  "company_name": "贵州茅台",
+  "source_pdf": "600519_贵州茅台_2025年年度报告.pdf",
+  "page_count": 143,
+  "statements": {
+    "balance_sheet": [
+      {
+        "item": "资产总计",
+        "value": 303834844021.443,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 57
+      },
+      {
+        "item": "负债合计",
+        "value": 49610476817.8156,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 58
+      },
+      {
+        "item": "所有者权益合计",
+        "value": 1256197800.001,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 68
+      },
+      {
+        "item": "货币资金",
+        "value": 51690610946.5017,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 14
+      },
+      {
+        "item": "应收账款",
+        "value": 2609048.49,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 14
+      },
+      {
+        "item": "存货",
+        "value": 61427421796.182,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 14
+      },
+      {
+        "item": "固定资产",
+        "value": 155949.50715,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 13
+      }
+    ],
+    "income_statement": [
+      {
+        "item": "营业收入",
+        "value": 168838102514.7917,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 6
+      },
+      {
+        "item": "营业利润",
+        "value": 1000.008,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 20
+      },
+      {
+        "item": "利润总额",
+        "value": 114755261605.08119,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 6
+      },
+      {
+        "item": "净利润",
+        "value": 82320067101.6886,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 6
+      },
+      {
+        "item": "归属于母公司股东的净利润",
+        "value": 82320067101.6886,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 62
+      },
+      {
+        "item": "营业成本",
+        "value": 14892277570.9113,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 9
+      }
+    ],
+    "cash_flow": [
+      {
+        "item": "经营活动产生的现金流量净额",
+        "value": 61522204989.3592,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 6
+      },
+      {
+        "item": "投资活动产生的现金流量净额",
+        "value": 31641898948.89,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 9
+      },
+      {
+        "item": "筹资活动产生的现金流量净额",
+        "value": 73427081208.87,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 9
+      },
+      {
+        "item": "现金及现金等价物净增加额",
+        "value": 43544479810.1119,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 66
+      }
+    ]
+  },
+  "notes": "Auto-extracted sample; manually verify before using for real F1 evaluation."
+}

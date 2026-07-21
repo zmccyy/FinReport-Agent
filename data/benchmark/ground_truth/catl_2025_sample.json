@@ -1,0 +1,137 @@
+{
+  "report_period": "2025-12-31",
+  "currency": "CNY",
+  "unit": "元",
+  "company_code": "300750",
+  "company_name": "宁德时代",
+  "source_pdf": "300750_宁德时代：2025年年度报告.pdf",
+  "page_count": 232,
+  "statements": {
+    "balance_sheet": [
+      {
+        "item": "资产总计",
+        "value": 974827544.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 112
+      },
+      {
+        "item": "负债合计",
+        "value": 399625988.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 113
+      },
+      {
+        "item": "所有者权益合计",
+        "value": 337107747.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 113
+      },
+      {
+        "item": "货币资金",
+        "value": 333512927.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 31
+      },
+      {
+        "item": "应收账款",
+        "value": 76403264.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 27
+      },
+      {
+        "item": "存货",
+        "value": 418585.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 31
+      },
+      {
+        "item": "固定资产",
+        "value": 146400592.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 31
+      }
+    ],
+    "income_statement": [
+      {
+        "item": "营业收入",
+        "value": 423701834.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 11
+      },
+      {
+        "item": "营业利润",
+        "value": 10.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 25
+      },
+      {
+        "item": "利润总额",
+        "value": 7970552.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 11
+      },
+      {
+        "item": "净利润",
+        "value": 50.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 4
+      },
+      {
+        "item": "归属于母公司股东的净利润",
+        "value": 72201282.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 117
+      },
+      {
+        "item": "营业成本",
+        "value": 417723738.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 25
+      }
+    ],
+    "cash_flow": [
+      {
+        "item": "经营活动产生的现金流量净额",
+        "value": 133219982.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 11
+      },
+      {
+        "item": "投资活动产生的现金流量净额",
+        "value": 94475790.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 30
+      },
+      {
+        "item": "筹资活动产生的现金流量净额",
+        "value": 6309543.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 30
+      },
+      {
+        "item": "现金及现金等价物净增加额",
+        "value": 29770008.0,
+        "scope": "合并",
+        "period": "本期",
+        "source_page": 30
+      }
+    ]
+  },
+  "notes": "Auto-extracted sample; manually verify before using for real F1 evaluation."
+}
