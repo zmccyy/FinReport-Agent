@@ -129,13 +129,13 @@ class StatementQueryServiceTest {
         @DisplayName("should group items by statement_type when report belongs to user")
         void shouldGroupByStatementType() {
             when(reportRepo.findById(11L)).thenReturn(Mono.just(report(11L, 7L)));
-            when(fsRepo.findByReportIdAndStatementType(eq(11L), eq("balance_sheet")))
+            when(fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(eq(11L), eq("balance_sheet")))
                     .thenReturn(Flux.just(
                             item(1L, "balance_sheet", "货币资金", new BigDecimal("1.5e9")),
                             item(2L, "balance_sheet", "应收账款", new BigDecimal("2.3e8"))));
-            when(fsRepo.findByReportIdAndStatementType(eq(11L), eq("income_statement")))
+            when(fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(eq(11L), eq("income_statement")))
                     .thenReturn(Flux.just(item(3L, "income_statement", "营业收入", new BigDecimal("8.8e9"))));
-            when(fsRepo.findByReportIdAndStatementType(eq(11L), eq("cash_flow")))
+            when(fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(eq(11L), eq("cash_flow")))
                     .thenReturn(Flux.just(item(4L, "cash_flow", "经营活动现金流净额", new BigDecimal("1.5e9"))));
 
             var resp = service().getStatements(11L, 7L).block();
@@ -156,11 +156,11 @@ class StatementQueryServiceTest {
         @DisplayName("should return empty lists when report has no statements")
         void shouldReturnEmptyListsWhenNoStatements() {
             when(reportRepo.findById(11L)).thenReturn(Mono.just(report(11L, 7L)));
-            when(fsRepo.findByReportIdAndStatementType(eq(11L), eq("balance_sheet")))
+            when(fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(eq(11L), eq("balance_sheet")))
                     .thenReturn(Flux.empty());
-            when(fsRepo.findByReportIdAndStatementType(eq(11L), eq("income_statement")))
+            when(fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(eq(11L), eq("income_statement")))
                     .thenReturn(Flux.empty());
-            when(fsRepo.findByReportIdAndStatementType(eq(11L), eq("cash_flow")))
+            when(fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(eq(11L), eq("cash_flow")))
                     .thenReturn(Flux.empty());
 
             var resp = service().getStatements(11L, 7L).block();

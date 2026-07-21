@@ -238,7 +238,18 @@ public class StatementWriter {
             return bd;
         }
         if (value instanceof Number n) {
-            return BigDecimal.valueOf(n.doubleValue());
+            // M2 review fix: 避免 BigDecimal.valueOf(double) 的精度损失。
+            // L3 Pydantic value 是 float,JSON 序列化为 number,Jackson 反序列化为 Double。
+            // 万亿级数值(1e12+)带小数时直接 double → BigDecimal 会丢精度。
+            // 改用 n.toString() 中转:Double.toString 输出最精确的 double 可表示形式,
+            // BigDecimal 能正确解析科学计数法,保留 double 能承载的全部有效数字。
+            // 根本解法是 L3 schema 把 value 改 str 序列化(留作 follow-up),
+            // 当前 L2 侧先用 String 中转兜底。
+            try {
+                return new BigDecimal(n.toString());
+            } catch (NumberFormatException e) {
+                return null;
+            }
         }
         if (value instanceof String s) {
             try {

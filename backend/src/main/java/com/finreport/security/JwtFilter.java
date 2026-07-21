@@ -76,7 +76,10 @@ public class JwtFilter implements WebFilter {
             return respond401(exchange, "Token 无效或已过期");
         }
 
-        // 校验 Token 黑名单（Redis 不可用时降级放行）
+        // 校验 Token 黑名单
+        // M2 review fix: 之前 Redis 故障时降级放行,违反 spec §8.5"登出加黑名单"安全契约。
+        // 已撤销的 token 可在 Redis 宕机期间继续访问。改为 Redis 故障时拒绝请求(503),
+        // 强制客户端在 Redis 恢复后重试,避免撤销语义被绕过。
         String jti = jwtUtil.getJti(token);
         return authService.isBlacklisted(jti)
                 .flatMap(isBlacklisted -> {
@@ -87,8 +90,8 @@ public class JwtFilter implements WebFilter {
                     return injectUserContext(exchange, chain, token, path);
                 })
                 .onErrorResume(e -> {
-                    log.warn("[JwtFilter] Redis 黑名单检查失败，降级放行 path={} error={}", path, e.getMessage());
-                    return injectUserContext(exchange, chain, token, path);
+                    log.warn("[JwtFilter] Redis 黑名单检查失败,拒绝请求 path={} error={}", path, e.getMessage());
+                    return respond503(exchange, "认证服务暂不可用,请稍后重试");
                 });
     }
 
@@ -116,6 +119,16 @@ public class JwtFilter implements WebFilter {
         exchange.getResponse().getHeaders().set(HttpHeaders.CONTENT_TYPE, "application/json");
         byte[] body = ("{\"type\":\"https://finreport.example/errors/UNAUTHORIZED\","
                 + "\"title\":\"Unauthorized\",\"status\":401,"
+                + "\"detail\":\"" + message + "\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return exchange.getResponse()
+                .writeWith(Mono.just(exchange.getResponse().bufferFactory().wrap(body)));
+    }
+
+    private Mono<Void> respond503(ServerWebExchange exchange, String message) {
+        exchange.getResponse().setStatusCode(HttpStatus.SERVICE_UNAVAILABLE);
+        exchange.getResponse().getHeaders().set(HttpHeaders.CONTENT_TYPE, "application/json");
+        byte[] body = ("{\"type\":\"https://finreport.example/errors/SERVICE_UNAVAILABLE\","
+                + "\"title\":\"Service Unavailable\",\"status\":503,"
                 + "\"detail\":\"" + message + "\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
         return exchange.getResponse()
                 .writeWith(Mono.just(exchange.getResponse().bufferFactory().wrap(body)));

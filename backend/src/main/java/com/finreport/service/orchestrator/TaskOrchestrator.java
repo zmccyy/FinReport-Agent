@@ -804,12 +804,14 @@ public class TaskOrchestrator {
         step.setRetryCount(nextRetry);
         step.setErrorMsg(errorMessage(result));
         task.setStatus(retryStatus.name());
-        // EXTRACT retry path clears the failed flag so a successful retry lets the
-        // hot-path CHECK trigger fire when the third sibling SUCCESS arrives.
-        Mono<Void> clearFailure = isExtract ? extractTracker.clearFailure(taskId) : Mono.empty();
+        // M2 review fix: clearFailure MUST happen AFTER publishRetry succeeds.
+        // 之前先 clearFailure 再 publishRetry,若另两个 step 的 SUCCESS 在此窗口回报,
+        // hasFailed=false + recordSuccess 推到 3 → hot path 触发 CHECK,但本 step 在
+        // MySQL 仍是 RETRY、statement 行缺失,CHECK 阶段会因数据不一致失败。
+        // 现在改为 publishRetry 成功后才 clearFailure;publishRetry 失败走
+        // markDispatchFailed 标记 task FAILED 并重新抛错。
         return stepRepo.save(step)
                 .then(taskRepo.save(task))
-                .flatMap(saved -> clearFailure.thenReturn(saved))
                 .flatMap(saved -> Mono.deferContextual(context -> Mono.fromCallable(() -> {
                     String traceId = context.getOrDefault(TraceContext.TRACE_ID, org.slf4j.MDC.get("traceId"));
                     messageProducer.publishRetry(
@@ -820,7 +822,12 @@ public class TaskOrchestrator {
                             traceId);
                     return saved;
                 })))
-                .onErrorMap(com.finreport.exception.IntegrationException.class, error -> error);
+                .flatMap(saved -> isExtract
+                        ? extractTracker.clearFailure(taskId).thenReturn(saved)
+                        : Mono.just(saved))
+                .onErrorResume(com.finreport.exception.IntegrationException.class,
+                        error -> markDispatchFailed(task, step, error)
+                                .then(Mono.<Task>error(error)));
     }
 
     private static String errorMessage(Map<String, Object> result) {

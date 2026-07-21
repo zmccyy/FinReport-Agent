@@ -53,6 +53,19 @@ public interface FinancialStatementRepository
     Flux<FinancialStatementItem> findByReportIdAndStatementType(Long reportId, String statementType);
 
     /**
+     * 按报告 ID + 表类型查询科目，按科目名字典序排序。
+     *
+     * <p>M2 review fix: 三表展示页要求稳定的展示顺序,原 {@link #findByReportIdAndStatementType}
+     * 无排序保证,SQL 返回顺序未定义。前端展示会随机。</p>
+     *
+     * @param reportId      报告 ID
+     * @param statementType 表类型
+     * @return 按 item_name 升序排列的科目列表
+     */
+    Flux<FinancialStatementItem> findByReportIdAndStatementTypeOrderByItemNameAsc(
+            Long reportId, String statementType);
+
+    /**
      * 删除某份报告的所有科目（重抽场景使用，避免残留脏数据）。
      *
      * @param reportId 报告 ID

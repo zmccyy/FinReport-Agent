@@ -173,7 +173,21 @@ class Validator:
                 error_hint=error_msg,
             )
 
-        assert result.statement is not None  # success implies statement is set
+        # M2 review fix: 之前用 assert,python -O 启动时被剥离。
+        # 防御性编程:若 success=True 但 statement=None(理论不应发生),
+        # 返回明确错误而非 NPE。
+        if result.statement is None:
+            return ValidationResult(
+                is_valid=False,
+                issues=[
+                    ValidationIssue(
+                        severity="error",
+                        code="missing_statement",
+                        message="extraction 报告 success=True 但 statement 为空",
+                    )
+                ],
+                error_hint="statement payload missing despite success flag",
+            )
         issues = self.validate_statement(result.statement)
 
         errors = [i for i in issues if i.severity == "error"]

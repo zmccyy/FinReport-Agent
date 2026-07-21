@@ -55,7 +55,7 @@ public class StatementQueryService {
     public Mono<ReportDetailResponse> getReportDetail(Long reportId, Long userId) {
         log.debug("[StatementQueryService] getReportDetail reportId={} userId={}", reportId, userId);
         return reportRepo.findById(reportId)
-                .filter(report -> report.getUserId().equals(userId))
+                .filter(report -> userId.equals(report.getUserId()))
                 .switchIfEmpty(Mono.error(new BusinessException(
                         HttpStatus.NOT_FOUND, "REPORT_NOT_FOUND",
                         "报告不存在: " + reportId)))
@@ -76,15 +76,15 @@ public class StatementQueryService {
     public Mono<StatementsResponse> getStatements(Long reportId, Long userId) {
         log.debug("[StatementQueryService] getStatements reportId={} userId={}", reportId, userId);
         return reportRepo.findById(reportId)
-                .filter(report -> report.getUserId().equals(userId))
+                .filter(report -> userId.equals(report.getUserId()))
                 .switchIfEmpty(Mono.error(new BusinessException(
                         HttpStatus.NOT_FOUND, "REPORT_NOT_FOUND",
                         "报告不存在: " + reportId)))
-                .flatMap(report -> fsRepo.findByReportIdAndStatementType(reportId, TYPE_BALANCE_SHEET)
+                .flatMap(report -> fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(reportId, TYPE_BALANCE_SHEET)
                         .collectList()
-                        .flatMap(bs -> fsRepo.findByReportIdAndStatementType(reportId, TYPE_INCOME_STATEMENT)
+                        .flatMap(bs -> fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(reportId, TYPE_INCOME_STATEMENT)
                                 .collectList()
-                                .flatMap(is -> fsRepo.findByReportIdAndStatementType(reportId, TYPE_CASH_FLOW)
+                                .flatMap(is -> fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(reportId, TYPE_CASH_FLOW)
                                         .collectList()
                                         .map(cf -> new StatementsResponse(
                                                 toResponses(bs),

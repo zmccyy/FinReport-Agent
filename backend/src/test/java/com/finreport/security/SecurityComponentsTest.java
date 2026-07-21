@@ -141,19 +141,18 @@ class SecurityComponentsTest {
         }
 
         @Test
-        @DisplayName("should degrade open if blacklist lookup fails")
+        @DisplayName("should reject with 503 if blacklist lookup fails (redis down)")
         void shouldDegradeOpenIfBlacklistLookupFails() {
+            // M2 review fix: Redis 故障时不再降级放行,改为 503 拒绝(spec §8.5 撤销语义)
             JwtFilter filter = new JwtFilter(jwtUtil, authService);
-            AtomicReference<ServerWebExchange> passed = new AtomicReference<>();
+            MockServerWebExchange exchange = exchange("/api/v1/tasks/task-1", "Bearer valid-token");
             when(jwtUtil.validate("valid-token")).thenReturn(true);
             when(jwtUtil.getJti("valid-token")).thenReturn("jti-valid");
             when(authService.isBlacklisted("jti-valid")).thenReturn(Mono.error(new IllegalStateException("redis down")));
-            when(jwtUtil.getUserId("valid-token")).thenReturn(42L);
-            when(jwtUtil.getUsername("valid-token")).thenReturn("alice");
 
-            filter.filter(exchange("/api/v1/tasks/task-1", "Bearer valid-token"), capture(passed)).block();
+            filter.filter(exchange, capture(new AtomicReference<>())).block();
 
-            assertEquals("42", passed.get().getRequest().getHeaders().getFirst("X-User-Id"));
+            assertEquals(HttpStatus.SERVICE_UNAVAILABLE, exchange.getResponse().getStatusCode());
         }
 
         @Test

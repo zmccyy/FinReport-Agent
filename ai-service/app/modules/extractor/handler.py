@@ -78,7 +78,15 @@ async def handle(message: TaskMessage) -> dict[str, Any]:
               "latency_ms": 5600
             }
     """
-    statement_type = _STEP_TO_TYPE.get(message.step, "balance_sheet")
+    statement_type = _STEP_TO_TYPE.get(message.step)
+    if statement_type is None:
+        # M2 review fix: 之前对未知 step 静默 fallback 到 balance_sheet 并返回 success=True,
+        # 若 MQ 路由配置错误把 extract.xyz 投进来,会写入 balance_sheet 假数据且无告警。
+        # 改为显式报错,让 MQ consumer 走 DLQ,避免污染数据。
+        raise ValueError(
+            f"Unknown extract step: {message.step!r}, "
+            f"expected one of {sorted(_STEP_TO_TYPE.keys())}"
+        )
     items = _MOCK_ITEMS.get(statement_type, [])
     return {
         "success": True,

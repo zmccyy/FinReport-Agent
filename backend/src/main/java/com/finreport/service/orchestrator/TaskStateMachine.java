@@ -36,8 +36,11 @@ public class TaskStateMachine {
         ALLOWED.put(TaskStatus.PENDING, Set.of(TaskStatus.PARSE_RUNNING, TaskStatus.CANCELLED));
 
         // 解析阶段
+        // M2 review fix: 加 FAILED — MQ dispatch 投递失败时 markDispatchFailed 直接转终态 FAILED,
+        // 这是 dispatch 失败的快速终态路径(非 step 执行失败,不走 *_FAILED → retry)。
         ALLOWED.put(TaskStatus.PARSE_RUNNING,
-                Set.of(TaskStatus.PARSE_SUCCESS, TaskStatus.PARSE_FAILED, TaskStatus.CANCELLED));
+                Set.of(TaskStatus.PARSE_SUCCESS, TaskStatus.PARSE_FAILED,
+                        TaskStatus.FAILED, TaskStatus.CANCELLED));
         ALLOWED.put(TaskStatus.PARSE_SUCCESS, Set.of(TaskStatus.EXTRACT_RUNNING));
         ALLOWED.put(TaskStatus.PARSE_FAILED,
                 Set.of(TaskStatus.PARSE_RETRY, TaskStatus.FAILED));
@@ -47,9 +50,10 @@ public class TaskStateMachine {
         // 抽取阶段
         ALLOWED.put(TaskStatus.EXTRACT_RUNNING,
                 Set.of(TaskStatus.EXTRACT_PARTIAL, TaskStatus.EXTRACT_SUCCESS,
-                        TaskStatus.EXTRACT_FAILED, TaskStatus.CANCELLED));
+                        TaskStatus.EXTRACT_FAILED, TaskStatus.FAILED, TaskStatus.CANCELLED));
         ALLOWED.put(TaskStatus.EXTRACT_PARTIAL,
-                Set.of(TaskStatus.EXTRACT_SUCCESS, TaskStatus.EXTRACT_FAILED, TaskStatus.CANCELLED));
+                Set.of(TaskStatus.EXTRACT_SUCCESS, TaskStatus.EXTRACT_FAILED,
+                        TaskStatus.FAILED, TaskStatus.CANCELLED));
         ALLOWED.put(TaskStatus.EXTRACT_SUCCESS, Set.of(TaskStatus.CHECK_RUNNING));
         ALLOWED.put(TaskStatus.EXTRACT_FAILED,
                 Set.of(TaskStatus.EXTRACT_RETRY, TaskStatus.FAILED));
@@ -59,7 +63,8 @@ public class TaskStateMachine {
 
         // 勾稽阶段
         ALLOWED.put(TaskStatus.CHECK_RUNNING,
-                Set.of(TaskStatus.CHECK_SUCCESS, TaskStatus.CHECK_FAILED, TaskStatus.CANCELLED));
+                Set.of(TaskStatus.CHECK_SUCCESS, TaskStatus.CHECK_FAILED,
+                        TaskStatus.FAILED, TaskStatus.CANCELLED));
         ALLOWED.put(TaskStatus.CHECK_SUCCESS, Set.of(TaskStatus.REPORT_RUNNING));
         ALLOWED.put(TaskStatus.CHECK_FAILED,
                 Set.of(TaskStatus.CHECK_RETRY, TaskStatus.FAILED));
@@ -68,7 +73,8 @@ public class TaskStateMachine {
 
         // 报告阶段
         ALLOWED.put(TaskStatus.REPORT_RUNNING,
-                Set.of(TaskStatus.REPORT_SUCCESS, TaskStatus.REPORT_FAILED, TaskStatus.CANCELLED));
+                Set.of(TaskStatus.REPORT_SUCCESS, TaskStatus.REPORT_FAILED,
+                        TaskStatus.FAILED, TaskStatus.CANCELLED));
         ALLOWED.put(TaskStatus.REPORT_SUCCESS, Set.of(TaskStatus.COMPLETED));
         ALLOWED.put(TaskStatus.REPORT_FAILED,
                 Set.of(TaskStatus.REPORT_RETRY, TaskStatus.FAILED));
