@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
-import { ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import AppHeader from '@/components/AppHeader.vue'
 import { useReportsStore, type TrackedReport } from '@/stores/reports'
 
 /**
  * 财报列表页（spec §6.5.1 /reports）。
  * M1 期间数据来自 localStorage（后端列表接口 M2+ 补齐）。
+ * M2.11：新增「查看三表」入口跳转 /reports/:id 详情页。
  */
 
 const router = useRouter()
@@ -51,6 +52,14 @@ function formatTime(iso: string): string {
 
 function viewProgress(row: TrackedReport): void {
   router.push({ name: 'TaskProgress', params: { taskId: row.taskId } })
+}
+
+function viewDetail(row: TrackedReport): void {
+  if (row.reportId == null) {
+    ElMessage.warning('报告尚未生成，请先完成解析')
+    return
+  }
+  router.push({ name: 'ReportDetail', params: { reportId: row.reportId } })
 }
 
 async function removeReport(row: TrackedReport): Promise<void> {
@@ -117,8 +126,17 @@ function goUpload(): void {
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="180" align="center">
+          <el-table-column label="操作" width="220" align="center">
             <template #default="{ row }">
+              <el-button
+                type="primary"
+                link
+                size="small"
+                :disabled="row.reportId == null"
+                @click="viewDetail(row)"
+              >
+                查看三表
+              </el-button>
               <el-button type="primary" link size="small" @click="viewProgress(row)">
                 查看进度
               </el-button>

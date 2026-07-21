@@ -84,3 +84,50 @@ export interface TaskInfo {
   startedAt?: string
   finishedAt?: string
 }
+
+/**
+ * 三表类型常量 — 与 L3 StatementType.value + L2 financial_statement.statement_type 锁定一致
+ * （spec §5.2.2 / plan M2.11）。
+ */
+export const STATEMENT_TYPE = {
+  BALANCE_SHEET: 'balance_sheet',
+  INCOME_STATEMENT: 'income_statement',
+  CASH_FLOW: 'cash_flow',
+} as const
+
+export type StatementType = typeof STATEMENT_TYPE[keyof typeof STATEMENT_TYPE]
+
+/** GET /reports/{reportId}/statements 单条科目 — spec §5.2.2 financial_statement 表 */
+export interface StatementItem {
+  id: number
+  statementType: StatementType | string
+  itemName: string
+  itemValue: number | null
+  currency: string
+  unit: string
+  scope: string
+  periodType: string
+  confidence: number | null
+  sourcePage: number | null
+}
+
+/** GET /reports/{reportId}/statements 响应 — 三表分组 */
+export interface StatementsResponse {
+  balanceSheet: StatementItem[]
+  incomeStatement: StatementItem[]
+  cashFlow: StatementItem[]
+}
+
+/** GET /reports/{reportId} 响应 — 详情页头部元数据 */
+export interface ReportDetail {
+  id: number
+  taskId: string
+  companyCode: string
+  companyName: string
+  reportType: string
+  reportPeriod: string
+  pageCount: number | null
+  parseStatus: string
+  pdfObjectKey: string
+  createdAt: string
+}

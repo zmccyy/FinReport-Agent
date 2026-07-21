@@ -138,6 +138,77 @@ paths:
           description: MySQL、Redis、RabbitMQ、MinIO 和 AI 服务均就绪。
         '503':
           description: 至少一个依赖不可用。
+  /internal/models/load:
+    post:
+      summary: 加载本地 LLM 到 ModelHub
+      description: |
+        M2.04：按逻辑名 + 量化标签加载本地 4-bit LLM（7B GPTQ-Int4 / 1.5B NF4）。
+        单模型驻存：加载不同 key 会先 unload 当前模型释放显存。
+        失败抛 AiException → 500 JSON envelope（ModelLoadException）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadModelRequest'
+      responses:
+        '200':
+          description: 模型加载成功。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadModelResponse'
+        '500':
+          description: 加载失败（缺依赖 / OOM / 权重缺失）。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /internal/models/status:
+    get:
+      summary: 查询 ModelHub 当前状态
+      responses:
+        '200':
+          description: 当前驻存 LLM + scene 路由表。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelStatusResponse'
+  /internal/models/generate:
+    post:
+      summary: 在驻存 LLM 上跑一次 generate
+      description: |
+        推理超时（默认 60s）抛 InferenceTimeoutException → 500；
+        OOM 抛 ModelLoadException → 500（上层按 spec §10.3 切 API 72B）。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateRequest'
+      responses:
+        '200':
+          description: 推理完成。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateResponse'
+        '500':
+          description: 推理失败或超时。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /internal/models/unload:
+    post:
+      summary: 卸载当前驻存 LLM
+      responses:
+        '200':
+          description: 卸载完成（无论之前是否加载）。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnloadResponse'
 components:
   securitySchemes:
     bearerAuth:
@@ -220,3 +291,84 @@ components:
           type: string
         traceId:
           type: string
+    LoadModelRequest:
+      type: object
+      required: [model, quant]
+      properties:
+        model:
+          type: string
+          example: '7b'
+          description: 逻辑模型名（`7b` / `1.5b`）。
+        quant:
+          type: string
+          example: gptq-int4
+          description: 量化标签（`gptq-int4` / `nf4`）。
+    LoadModelResponse:
+      type: object
+      properties:
+        model:
+          type: string
+        quant:
+          type: string
+        loaded:
+          type: boolean
+          example: true
+    GenerateRequest:
+      type: object
+      required: [prompt]
+      properties:
+        prompt:
+          type: string
+          minLength: 1
+        max_new_tokens:
+          type: integer
+          minimum: 1
+          maximum: 4096
+          default: 512
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+          default: 0.0
+        timeout_seconds:
+          type: number
+          nullable: true
+          minimum: 1
+          maximum: 600
+    GenerateResponse:
+      type: object
+      properties:
+        text:
+          type: string
+        prompt_tokens:
+          type: integer
+        completion_tokens:
+          type: integer
+        latency_ms:
+          type: number
+        first_token_ms:
+          type: number
+    ModelStatusResponse:
+      type: object
+      properties:
+        loaded_llm:
+          type: string
+          nullable: true
+        is_loaded:
+          type: boolean
+        scenes:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              model:
+                type: string
+              quant:
+                type: string
+    UnloadResponse:
+      type: object
+      properties:
+        unloaded:
+          type: boolean
+        status:
+          type: object

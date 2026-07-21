@@ -44,6 +44,8 @@ class ControllerUnitTest {
     @Mock
     private FileService fileService;
     @Mock
+    private com.finreport.service.statement.StatementQueryService statementQueryService;
+    @Mock
     private TaskOrchestrator orchestrator;
     @Mock
     private FilePart filePart;
