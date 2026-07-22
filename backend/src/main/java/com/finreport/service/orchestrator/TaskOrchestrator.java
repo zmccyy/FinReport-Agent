@@ -22,6 +22,7 @@ import com.finreport.mq.TaskMessageProducer;
 import com.finreport.repository.ReportRepository;
 import com.finreport.repository.TaskRepository;
 import com.finreport.repository.TaskStepRepository;
+import com.finreport.service.reasoner.CheckResultWriter;
 import com.finreport.service.statement.StatementWriter;
 import com.finreport.trace.TraceContext;
 
@@ -56,6 +57,7 @@ public class TaskOrchestrator {
     private final ExtractCompletionTracker extractTracker;
     private final StatementWriter statementWriter;
     private final ExtractCacheService extractCacheService;
+    private final CheckResultWriter checkResultWriter;
     private final ReportRepository reportRepo;
 
     public TaskOrchestrator(
@@ -69,6 +71,7 @@ public class TaskOrchestrator {
             ExtractCompletionTracker extractTracker,
             StatementWriter statementWriter,
             ExtractCacheService extractCacheService,
+            CheckResultWriter checkResultWriter,
             ReportRepository reportRepo) {
         this.taskRepo = taskRepo;
         this.stepRepo = stepRepo;
@@ -80,6 +83,7 @@ public class TaskOrchestrator {
         this.extractTracker = extractTracker;
         this.statementWriter = statementWriter;
         this.extractCacheService = extractCacheService;
+        this.checkResultWriter = checkResultWriter;
         this.reportRepo = reportRepo;
     }
 
@@ -510,6 +514,14 @@ public class TaskOrchestrator {
                                             .then(storeExtractCache(taskId, TaskStepName.valueOf(stepName), result))
                                             .then(handleExtractStepSuccess(
                                                     updatedTask, taskId, TaskStepName.valueOf(stepName)));
+                                }
+                                if ("CHECK".equals(stepName)) {
+                                    // M3.04: persist check rules + anomalies before triggering REPORT.
+                                    // Write failures are logged inside CheckResultWriter but do not
+                                    // block the state machine — a missing row surfaces as a REPORT
+                                    // generation failure downstream (spec §8.4 失败不强制回滚).
+                                    return checkResultWriter.writeCheckResult(taskId, result)
+                                            .then(handleNonExtractStepSuccess(updatedTask, stepName, taskId));
                                 }
                                 return handleNonExtractStepSuccess(updatedTask, stepName, taskId);
                             });

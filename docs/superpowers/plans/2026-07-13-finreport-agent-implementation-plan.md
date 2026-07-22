@@ -1,9 +1,11 @@
 # FinReport Agent 实现计划
 
 > **配套设计文档**：[2026-07-13-finreport-agent-design.md](../specs/2026-07-13-finreport-agent-design.md)
-> **版本**：v1.1
-> **日期**：2026-07-19（最后更新）
-> **状态**：M1 已完成，M2 待开始
+> **版本**：v1.2
+> **日期**：2026-07-22（最后更新）
+> **状态**：M1、M2 已完成，M3 进行中（M3.01 已完成）
+> **实时进度**：以 `docs/progress/m{N}.md` 和 `docs/decisions/` 为准
+> **Skills 约束**：见 `docs/skills.md`
 > **总周期**：12 周 / 6 个里程碑 / 约 720h
 
 ---

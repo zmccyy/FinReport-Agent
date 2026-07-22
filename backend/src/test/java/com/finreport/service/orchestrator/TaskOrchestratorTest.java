@@ -39,6 +39,7 @@ import com.finreport.mq.TaskMessageProducer;
 import com.finreport.repository.ReportRepository;
 import com.finreport.repository.TaskRepository;
 import com.finreport.repository.TaskStepRepository;
+import com.finreport.service.reasoner.CheckResultWriter;
 import com.finreport.service.statement.StatementWriter;
 import com.finreport.trace.TraceContext;
 
@@ -83,6 +84,9 @@ class TaskOrchestratorTest {
     private ExtractCacheService extractCacheService;
 
     @Mock
+    private CheckResultWriter checkResultWriter;
+
+    @Mock
     private ReportRepository reportRepo;
 
     private TaskStateMachine stateMachine;
@@ -93,7 +97,8 @@ class TaskOrchestratorTest {
         stateMachine = new TaskStateMachine();
         orchestrator = new TaskOrchestrator(
                 taskRepo, stepRepo, stateMachine, messageProducer, databaseClient, transactionalOperator,
-                extractDispatcher, extractTracker, statementWriter, extractCacheService, reportRepo);
+                extractDispatcher, extractTracker, statementWriter, extractCacheService,
+                checkResultWriter, reportRepo);
         // M2.09: StatementWriter returns 0 by default; individual tests override when needed.
         lenient().when(statementWriter.writeStatement(anyString(), anyString(), any()))
                 .thenReturn(Mono.just(0));
@@ -102,6 +107,9 @@ class TaskOrchestratorTest {
         lenient().when(extractCacheService.lookupAll(anyString())).thenReturn(Mono.just(java.util.Map.of()));
         lenient().when(extractCacheService.store(anyString(), any(TaskStepName.class), any()))
                 .thenReturn(Mono.empty());
+        // M3.04: CheckResultWriter returns 0 by default; individual tests override when needed.
+        lenient().when(checkResultWriter.writeCheckResult(anyString(), any()))
+                .thenReturn(Mono.just(0));
     }
 
     @Nested

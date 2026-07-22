@@ -12,10 +12,10 @@ CREATE INDEX idx_report_parse_status ON report (parse_status);
 -- 用户维度查询财报（用户级列表、仪表盘）
 CREATE INDEX idx_report_user_id ON report (user_id);
 
--- 按勾稽规则类型筛选（如仅查 BALANCE_CHECK）
+-- 按勾稽规则类型筛选（如仅查 balance_sheet_identity）
 CREATE INDEX idx_check_rule_type ON accounting_check (rule_type);
 
--- 异常按类型 + 严重度组合筛选（如筛选所有 HIGH 的 RATIO_ANOMALY）
+-- 异常按类型 + 严重度组合筛选（如筛选所有 ERROR 的 yoy_change）
 CREATE INDEX idx_anomaly_type_severity ON anomaly (anomaly_type, severity);
 
 -- 异常按严重度快速筛选

@@ -1,6 +1,6 @@
 # FinReport Agent
 
-A 股上市公司财报深度解析 Agent。M1.01–M1.12 覆盖开发基础设施、认证、PDF 上传、任务编排、进度消息与 SSE 恢复基础能力。
+A 股上市公司财报深度解析 Agent。当前已完成 M1 基础设施与骨架、M2 解析与抽取闭环，并完成 M3.01 勾稽规则引擎；当前工作阶段为 M3.02–M3.10。
 
 ## 前置条件
 
@@ -66,3 +66,10 @@ cd backend
 6. 使用上面的 Maven 命令完成单元、覆盖率、静态检查和 Testcontainers 验收。
 
 接口语义详见 `docs/api/openapi.yaml`，部署细节详见 `docs/deployment.md`。
+## 当前开发状态与协作规范
+
+- 当前里程碑：M3 勾稽异常与报告生成（M3.01 已完成）。
+- 进度明细：`docs/progress/m1.md` 至 `docs/progress/m6.md`。
+- AI 协作规范：`AGENTS.md`、`CLAUDE.md`。
+- Skills 保留、按需启用和冲突约束：`docs/skills.md`。
+- 实现计划中的总体目标和依赖关系不等同于实时进度，实时状态以 `docs/progress/` 和 `docs/decisions/` 为准。

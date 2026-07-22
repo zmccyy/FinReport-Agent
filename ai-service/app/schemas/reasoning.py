@@ -87,6 +87,7 @@ class RuleResult(BaseModel):
         tolerance: 浮点比较容差（元）。
         note: 差异原因说明；M3.01 留空，M3.02 LLM 复核回填。
         missing_items: 规则计算时缺失的科目名列表（用于 LLM 复核定位）。
+        llm_reviewed: 是否经过 M3.02 LLM 复核；True 表示 note 已由 7B 回填。
     """
 
     rule_type: RuleType
@@ -101,6 +102,10 @@ class RuleResult(BaseModel):
     missing_items: list[str] = Field(
         default_factory=list,
         description="规则计算时缺失的科目名列表（用于 LLM 复核定位）",
+    )
+    llm_reviewed: bool = Field(
+        default=False,
+        description="是否经过 M3.02 LLM 复核；True 表示 note 字段已由 7B 回填",
     )
 
     @field_validator("expected", "actual", "diff", "tolerance")
@@ -122,9 +127,7 @@ class Anomaly(BaseModel):
     """
 
     item_name: str = Field(description="异常科目名")
-    anomaly_type: str = Field(
-        description="异常类型：yoy_change / qoq_change / logic_conflict"
-    )
+    anomaly_type: str = Field(description="异常类型：yoy_change / qoq_change / logic_conflict")
     metric_value: Decimal | None = Field(default=None, description="异常指标值")
     threshold: Decimal | None = Field(default=None, description="触发阈值")
     description: str = Field(default="", description="异常描述")
@@ -176,9 +179,7 @@ class StatementSnapshot(BaseModel):
             statements=snapshot_statements,
         )
 
-    def get(
-        self, statement_type: StatementType, item_name: str
-    ) -> Decimal | None:
+    def get(self, statement_type: StatementType, item_name: str) -> Decimal | None:
         """查询单个科目值；不存在返回 None。"""
         return self.statements.get(statement_type, {}).get(item_name)
 
