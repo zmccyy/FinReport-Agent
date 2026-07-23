@@ -69,13 +69,20 @@ function confidenceType(item: StatementItem): 'success' | 'warning' | 'danger' |
 <template>
   <section class="statement-table">
     <header class="statement-table__head">
-      <h3 class="head__title">{{ title }}</h3>
-      <span v-if="editedCount > 0" class="head__edited">已编辑 {{ editedCount }} 项</span>
+      <div class="head__left">
+        <h3 class="head__title">{{ title }}</h3>
+        <span v-if="editedCount > 0" class="head__edited">已编辑 {{ editedCount }} 项</span>
+      </div>
       <span class="head__count">共 {{ items.length }} 项</span>
     </header>
 
     <div v-if="hasData" class="statement-table__body">
-      <el-table :data="items" stripe style="width: 100%" row-key="id" border>
+      <el-table
+        :data="items"
+        style="width: 100%"
+        row-key="id"
+        class="fin-el-table"
+      >
         <el-table-column label="科目" min-width="200">
           <template #default="{ row }">
             <span class="cell-item">{{ row.itemName }}</span>
@@ -109,13 +116,13 @@ function confidenceType(item: StatementItem): 'success' | 'warning' | 'danger' |
 
         <el-table-column label="范围" width="90">
           <template #default="{ row }">
-            <el-tag size="small" effect="plain" type="info">{{ row.scope || '合并' }}</el-tag>
+            <el-tag size="small" effect="plain" type="info" class="scope-tag">{{ row.scope || '合并' }}</el-tag>
           </template>
         </el-table-column>
 
         <el-table-column label="置信度" width="100" align="center">
           <template #default="{ row }">
-            <el-tag size="small" :type="confidenceType(row)">{{ confidenceLabel(row) }}</el-tag>
+            <el-tag size="small" :type="confidenceType(row)" effect="light" round>{{ confidenceLabel(row) }}</el-tag>
           </template>
         </el-table-column>
 
@@ -144,9 +151,15 @@ function confidenceType(item: StatementItem): 'success' | 'warning' | 'danger' |
 
 .statement-table__head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 16px;
+}
+
+.head__left {
+  display: flex;
+  align-items: center;
   gap: 12px;
-  padding: 4px 0 16px;
 }
 
 .head__title {
@@ -156,32 +169,71 @@ function confidenceType(item: StatementItem): 'success' | 'warning' | 'danger' |
 }
 
 .head__count {
-  margin-left: auto;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--fin-text-secondary);
+  font-weight: 500;
 }
 
 .head__edited {
   font-size: 12px;
   color: var(--fin-warning);
-  background: rgba(230, 126, 34, 0.08);
+  background: var(--fin-warning-subtle);
   padding: 2px 8px;
-  border-radius: var(--fin-radius-sm);
+  border-radius: var(--fin-radius-xs);
+  font-weight: 500;
 }
 
 .statement-table__body {
   overflow-x: auto;
 }
 
+/* Element Plus 表格样式覆盖 */
+:deep(.fin-el-table .el-table__header-wrapper th) {
+  background: var(--fin-bg);
+  color: var(--fin-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  height: 40px;
+}
+
+:deep(.fin-el-table .el-table__header-wrapper th .cell) {
+  line-height: 1.4;
+}
+
+:deep(.fin-el-table .el-table__body tr) {
+  transition: background 0.15s ease;
+}
+
+:deep(.fin-el-table .el-table__body tr:hover > td) {
+  background: var(--fin-primary-bg) !important;
+}
+
+:deep(.fin-el-table .el-table__row td) {
+  padding: 10px 0;
+}
+
 .value-input :deep(.el-input__wrapper) {
   background: transparent;
   box-shadow: none;
   font-variant-numeric: tabular-nums;
+  border-radius: var(--fin-radius-xs);
+  transition: box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.value-input :deep(.el-input__wrapper.is-focus) {
+  background: var(--fin-surface);
+  box-shadow: 0 0 0 2px var(--fin-primary-subtle), inset 0 0 0 1px var(--fin-primary-light);
 }
 
 .value-input--edited :deep(.el-input__wrapper) {
-  background: rgba(230, 126, 34, 0.06);
+  background: var(--fin-warning-subtle);
   box-shadow: inset 0 0 0 1px var(--fin-warning);
+}
+
+.value-input--edited :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 2px var(--fin-warning-subtle), inset 0 0 0 1px var(--fin-warning);
 }
 
 .cell-item {
@@ -194,6 +246,10 @@ function confidenceType(item: StatementItem): 'success' | 'warning' | 'danger' |
   color: var(--fin-text-regular);
 }
 
+.scope-tag {
+  border-radius: var(--fin-radius-xs);
+}
+
 .cell-page {
   font-size: 12px;
   font-family: 'SFMono-Regular', Consolas, monospace;
@@ -201,7 +257,7 @@ function confidenceType(item: StatementItem): 'success' | 'warning' | 'danger' |
 }
 
 .cell-page--none {
-  color: var(--fin-text-secondary);
+  color: var(--fin-text-tertiary);
 }
 
 .statement-table__empty {

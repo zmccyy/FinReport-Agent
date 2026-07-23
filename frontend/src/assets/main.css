@@ -1,40 +1,55 @@
-/*
- * FinReport Agent 全局样式与设计令牌。
- * 金融主题：深蓝主色 + 干净中性色，专业、克制。
- */
-
 :root {
-  /* 品牌色 */
-  --fin-primary: #1a5276;
-  --fin-primary-light: #2e86c1;
-  --fin-primary-lighter: #5da9dd;
-  --fin-primary-bg: #eaf3fa;
+  /* 背景层级 */
+  --fin-bg: #f7f7f8;
+  --fin-surface: #ffffff;
+  --fin-surface-elevated: #ffffff;
+
+  /* 文字层级 */
+  --fin-text-primary: #111113;
+  --fin-text-regular: #2c2c2e;
+  --fin-text-secondary: #6e6e78;
+  --fin-text-tertiary: #a0a0aa;
+
+  /* 边框与分隔 */
+  --fin-border: #ededf0;
+  --fin-border-strong: #e4e4e9;
+  --fin-divider: #f0f0f3;
+
+  /* 品牌色（清透蓝） */
+  --fin-primary: #2563eb;
+  --fin-primary-light: #3b82f6;
+  --fin-primary-lighter: #93c5fd;
+  --fin-primary-bg: #eff6ff;
+  --fin-primary-subtle: rgba(37, 99, 235, 0.08);
 
   /* 语义色 */
-  --fin-success: #27ae60;
-  --fin-warning: #e67e22;
-  --fin-danger: #c0392b;
-  --fin-info: #7f8c9b;
-
-  /* 中性色 */
-  --fin-bg: #f3f6fa;
-  --fin-card-bg: #ffffff;
-  --fin-text-primary: #1f2d3d;
-  --fin-text-regular: #4a5a6a;
-  --fin-text-secondary: #8a97a5;
-  --fin-border: #e3e9f0;
+  --fin-success: #10b981;
+  --fin-success-bg: #ecfdf5;
+  --fin-success-subtle: rgba(16, 185, 129, 0.08);
+  --fin-warning: #f59e0b;
+  --fin-warning-bg: #fffbeb;
+  --fin-warning-subtle: rgba(245, 158, 11, 0.08);
+  --fin-danger: #ef4444;
+  --fin-danger-bg: #fef2f2;
+  --fin-danger-subtle: rgba(239, 68, 68, 0.08);
+  --fin-info: #6366f1;
+  --fin-info-bg: #eef2ff;
+  --fin-info-subtle: rgba(99, 102, 241, 0.08);
 
   /* 阴影 */
-  --fin-shadow-sm: 0 1px 3px rgba(26, 82, 118, 0.08);
-  --fin-shadow-md: 0 4px 16px rgba(26, 82, 118, 0.1);
-  --fin-shadow-lg: 0 12px 32px rgba(26, 82, 118, 0.16);
+  --fin-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --fin-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.05);
+  --fin-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.08);
+  --fin-shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.07);
 
   /* 圆角 */
-  --fin-radius: 10px;
-  --fin-radius-sm: 6px;
+  --fin-radius-xs: 6px;
+  --fin-radius-sm: 10px;
+  --fin-radius-md: 14px;
+  --fin-radius-lg: 18px;
 
   /* Element Plus 主色对齐品牌色 */
-  --el-color-primary: var(--fin-primary-light);
+  --el-color-primary: var(--fin-primary);
 }
 
 * {
@@ -62,17 +77,25 @@ body {
 /* 通用容器宽度 */
 .fin-container {
   width: 100%;
-  max-width: 1080px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 0 24px;
 }
 
 /* 通用卡片 */
 .fin-card {
-  background: var(--fin-card-bg);
+  background: var(--fin-surface);
   border: 1px solid var(--fin-border);
-  border-radius: var(--fin-radius);
+  border-radius: var(--fin-radius-md);
   box-shadow: var(--fin-shadow-sm);
+  transition:
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.fin-card--hover:hover {
+  box-shadow: var(--fin-shadow-card-hover);
+  transform: translateY(-2px);
 }
 
 /* 页面淡入 */
@@ -89,4 +112,20 @@ body {
 
 .fin-fade-up {
   animation: fin-fade-up 0.32s ease both;
+}
+
+/* Tab 内容切换动画 */
+@keyframes fin-fade-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fin-tab-content {
+  animation: fin-fade-slide-in 0.2s ease both;
 }

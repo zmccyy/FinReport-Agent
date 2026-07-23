@@ -33,6 +33,13 @@ prod = [
     "transformers>=4.40",    # M2.04 LLM 加载（GPTQ / bitsandbytes 4-bit）
     "accelerate>=0.30",      # M2.04 device_map="auto" + CPU offload
     "bitsandbytes>=0.43",    # M2.04 nf4 量化（1.5B QLoRA 基座）
+    # M3.06 报告图表渲染（spec §2.3 M10 ECharts 服务端渲染 PNG）
+    "matplotlib>=3.8",       # 3 张图表（饼图/折线/柱状）服务端渲染
+    "pillow>=10.0",          # matplotlib 图像后端 + PNG bytes 处理
+    # M3.07 Markdown → PDF（spec §2.3 M10 WeasyPrint）
+    "weasyprint>=60.0",      # HTML/CSS → PDF（spec 字面要求）
+    "markdown>=3.5",         # ReportResult.to_markdown() → HTML
+    "jinja2>=3.1",           # report.html 模板渲染
 ]
 dev = [
     "pytest>=8.0",

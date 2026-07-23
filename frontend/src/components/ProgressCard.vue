@@ -264,8 +264,8 @@ function extractTagType(status: StageStatus): 'success' | 'danger' | 'primary' |
   gap: 14px;
   margin-top: 20px;
   padding: 16px 18px;
-  background: #f0f9f2;
-  border: 1px solid #c7ecd2;
+  background: var(--fin-success-bg);
+  border: 1px solid var(--fin-success-subtle);
   border-radius: var(--fin-radius-sm);
 }
 

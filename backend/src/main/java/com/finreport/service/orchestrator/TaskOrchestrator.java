@@ -22,6 +22,7 @@ import com.finreport.mq.TaskMessageProducer;
 import com.finreport.repository.ReportRepository;
 import com.finreport.repository.TaskRepository;
 import com.finreport.repository.TaskStepRepository;
+import com.finreport.service.artifact.ReportArtifactWriter;
 import com.finreport.service.reasoner.CheckResultWriter;
 import com.finreport.service.statement.StatementWriter;
 import com.finreport.trace.TraceContext;
@@ -58,6 +59,7 @@ public class TaskOrchestrator {
     private final StatementWriter statementWriter;
     private final ExtractCacheService extractCacheService;
     private final CheckResultWriter checkResultWriter;
+    private final ReportArtifactWriter reportArtifactWriter;
     private final ReportRepository reportRepo;
 
     public TaskOrchestrator(
@@ -72,6 +74,7 @@ public class TaskOrchestrator {
             StatementWriter statementWriter,
             ExtractCacheService extractCacheService,
             CheckResultWriter checkResultWriter,
+            ReportArtifactWriter reportArtifactWriter,
             ReportRepository reportRepo) {
         this.taskRepo = taskRepo;
         this.stepRepo = stepRepo;
@@ -84,6 +87,7 @@ public class TaskOrchestrator {
         this.statementWriter = statementWriter;
         this.extractCacheService = extractCacheService;
         this.checkResultWriter = checkResultWriter;
+        this.reportArtifactWriter = reportArtifactWriter;
         this.reportRepo = reportRepo;
     }
 
@@ -521,6 +525,15 @@ public class TaskOrchestrator {
                                     // block the state machine — a missing row surfaces as a REPORT
                                     // generation failure downstream (spec §8.4 失败不强制回滚).
                                     return checkResultWriter.writeCheckResult(taskId, result)
+                                            .then(handleNonExtractStepSuccess(updatedTask, stepName, taskId));
+                                }
+                                if ("REPORT".equals(stepName)) {
+                                    // M3.08: upload PDF/MD/PNG to MinIO + write report_artifact
+                                    // before transitioning to COMPLETED. Write failures are logged
+                                    // inside ReportArtifactWriter but do not block the state machine
+                                    // — a missing artifact surfaces as a download failure downstream
+                                    // (spec §8.4 失败不强制回滚).
+                                    return reportArtifactWriter.writeArtifacts(taskId, result)
                                             .then(handleNonExtractStepSuccess(updatedTask, stepName, taskId));
                                 }
                                 return handleNonExtractStepSuccess(updatedTask, stepName, taskId);

@@ -80,15 +80,16 @@ async function handleLogout(): Promise<void> {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: var(--fin-card-bg);
+  background: rgba(255, 255, 255, 0.82);
   border-bottom: 1px solid var(--fin-border);
-  box-shadow: var(--fin-shadow-sm);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .app-header__inner {
   display: flex;
   align-items: center;
-  height: 60px;
+  height: 56px;
   gap: 32px;
 }
 
@@ -103,14 +104,15 @@ async function handleLogout(): Promise<void> {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--fin-radius-xs);
   background: linear-gradient(135deg, var(--fin-primary) 0%, var(--fin-primary-light) 100%);
   color: #fff;
   font-weight: 700;
-  font-size: 13px;
+  font-size: 12px;
   letter-spacing: 0.5px;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
 }
 
 .brand__name {

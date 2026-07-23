@@ -15,13 +15,20 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.finreport.domain.dto.AccountingCheckResponse;
+import com.finreport.domain.dto.AnomalyResponse;
+import com.finreport.domain.dto.ReportArtifactResponse;
 import com.finreport.domain.dto.ReportDetailResponse;
 import com.finreport.domain.dto.StatementsResponse;
 import com.finreport.domain.dto.UploadResponse;
 import com.finreport.exception.BusinessException;
+import com.finreport.service.artifact.ArtifactQueryService;
 import com.finreport.service.file.FileService;
+import com.finreport.service.reasoner.AnomalyQueryService;
+import com.finreport.service.reasoner.CheckQueryService;
 import com.finreport.service.statement.StatementQueryService;
 
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 /**
@@ -39,16 +46,27 @@ public class ReportController {
 
     private final FileService fileService;
     private final StatementQueryService statementQueryService;
+    private final CheckQueryService checkQueryService;
+    private final AnomalyQueryService anomalyQueryService;
+    private final ArtifactQueryService artifactQueryService;
 
     @Autowired
-    public ReportController(FileService fileService, StatementQueryService statementQueryService) {
+    public ReportController(
+            FileService fileService,
+            StatementQueryService statementQueryService,
+            CheckQueryService checkQueryService,
+            AnomalyQueryService anomalyQueryService,
+            ArtifactQueryService artifactQueryService) {
         this.fileService = fileService;
         this.statementQueryService = statementQueryService;
+        this.checkQueryService = checkQueryService;
+        this.anomalyQueryService = anomalyQueryService;
+        this.artifactQueryService = artifactQueryService;
     }
 
     /** Backward-compatible constructor for isolated upload tests. */
     public ReportController(FileService fileService) {
-        this(fileService, null);
+        this(fileService, null, null, null, null);
     }
 
     /**
@@ -136,5 +154,60 @@ public class ReportController {
         log.debug("[ReportController] GET /reports/{}/statements userId={}", reportId, userIdHeader);
         return statementQueryService.getStatements(reportId, userIdHeader)
                 .map(ResponseEntity::ok);
+    }
+
+    /**
+     * 查询勾稽核对结果 — spec §6.2.2 / M3.09。
+     *
+     * <p>{@code GET /api/v1/reports/{reportId}/checks}。
+     * 返回规则列表 + 通过/失败标识，按 ruleType 排序。</p>
+     *
+     * @param reportId    报告 ID
+     * @param userIdHeader X-User-Id（归属校验）
+     * @return 勾稽结果列表；report 不存在或无权限返回 404
+     */
+    @GetMapping("/reports/{reportId}/checks")
+    public Flux<AccountingCheckResponse> getChecks(
+            @PathVariable("reportId") Long reportId,
+            @RequestHeader("X-User-Id") Long userIdHeader) {
+        log.debug("[ReportController] GET /reports/{}/checks userId={}", reportId, userIdHeader);
+        return checkQueryService.listChecks(reportId, userIdHeader);
+    }
+
+    /**
+     * 查询异常检测结果 — spec §6.2.2 / M3.09。
+     *
+     * <p>{@code GET /api/v1/reports/{reportId}/anomalies}。
+     * 返回异常卡片列表，按严重度降序排列（CRITICAL > ERROR > WARN > INFO）。</p>
+     *
+     * @param reportId    报告 ID
+     * @param userIdHeader X-User-Id（归属校验）
+     * @return 异常列表；report 不存在或无权限返回 404
+     */
+    @GetMapping("/reports/{reportId}/anomalies")
+    public Flux<AnomalyResponse> getAnomalies(
+            @PathVariable("reportId") Long reportId,
+            @RequestHeader("X-User-Id") Long userIdHeader) {
+        log.debug("[ReportController] GET /reports/{}/anomalies userId={}", reportId, userIdHeader);
+        return anomalyQueryService.listAnomalies(reportId, userIdHeader);
+    }
+
+    /**
+     * 查询报告产物 — spec §6.2.2 / M3.09。
+     *
+     * <p>{@code GET /api/v1/reports/{reportId}/artifacts}。
+     * 返回 PDF / Markdown / 图表 PNG 列表，GENERATED 产物附带 MinIO
+     * 预签名下载 URL。</p>
+     *
+     * @param reportId    报告 ID
+     * @param userIdHeader X-User-Id（归属校验）
+     * @return 产物列表；report 不存在或无权限返回 404
+     */
+    @GetMapping("/reports/{reportId}/artifacts")
+    public Flux<ReportArtifactResponse> getArtifacts(
+            @PathVariable("reportId") Long reportId,
+            @RequestHeader("X-User-Id") Long userIdHeader) {
+        log.debug("[ReportController] GET /reports/{}/artifacts userId={}", reportId, userIdHeader);
+        return artifactQueryService.listArtifacts(reportId, userIdHeader);
     }
 }

@@ -46,7 +46,7 @@ class ReportControllerStatementsTest {
         @Test
         @DisplayName("should return 200 with report detail when report exists and belongs to user")
         void shouldReturnReportDetailWhenOwned() {
-            ReportController controller = new ReportController(null, statementQueryService);
+            ReportController controller = new ReportController(null, statementQueryService, null, null, null);
             ReportDetailResponse detail = new ReportDetailResponse(
                     11L, "task-1", "600519", "贵州茅台", "ANNUAL", "2024-12-31",
                     120, "COMPLETED", "reports/11.pdf", Instant.parse("2026-07-21T10:00:00Z"));
@@ -61,7 +61,7 @@ class ReportControllerStatementsTest {
         @Test
         @DisplayName("should propagate REPORT_NOT_FOUND when report does not exist")
         void shouldPropagateNotFoundWhenReportMissing() {
-            ReportController controller = new ReportController(null, statementQueryService);
+            ReportController controller = new ReportController(null, statementQueryService, null, null, null);
             when(statementQueryService.getReportDetail(eq(99L), eq(7L)))
                     .thenReturn(Mono.error(new BusinessException(
                             org.springframework.http.HttpStatus.NOT_FOUND,
@@ -76,7 +76,7 @@ class ReportControllerStatementsTest {
         @Test
         @DisplayName("should propagate REPORT_NOT_FOUND when report belongs to another user")
         void shouldPropagateNotFoundWhenReportOwnedByOtherUser() {
-            ReportController controller = new ReportController(null, statementQueryService);
+            ReportController controller = new ReportController(null, statementQueryService, null, null, null);
             when(statementQueryService.getReportDetail(eq(11L), eq(8L)))
                     .thenReturn(Mono.error(new BusinessException(
                             org.springframework.http.HttpStatus.NOT_FOUND,
@@ -96,7 +96,7 @@ class ReportControllerStatementsTest {
         @Test
         @DisplayName("should return 200 with grouped BS/IS/CF lists when report owned")
         void shouldReturnGroupedStatementsWhenOwned() {
-            ReportController controller = new ReportController(null, statementQueryService);
+            ReportController controller = new ReportController(null, statementQueryService, null, null, null);
             StatementItemResponse bsItem = new StatementItemResponse(
                     1L, "balance_sheet", "货币资金", new BigDecimal("1587023498.50"),
                     "CNY", "元", "合并", "本期", new BigDecimal("0.95"), 5);
@@ -126,7 +126,7 @@ class ReportControllerStatementsTest {
         @Test
         @DisplayName("should return empty lists when report has no extracted statements yet")
         void shouldReturnEmptyListsWhenNoStatements() {
-            ReportController controller = new ReportController(null, statementQueryService);
+            ReportController controller = new ReportController(null, statementQueryService, null, null, null);
             when(statementQueryService.getStatements(eq(11L), eq(7L)))
                     .thenReturn(Mono.just(StatementsResponse.empty()));
 
@@ -143,7 +143,7 @@ class ReportControllerStatementsTest {
         @Test
         @DisplayName("should propagate REPORT_NOT_FOUND when report missing")
         void shouldPropagateNotFoundWhenReportMissing() {
-            ReportController controller = new ReportController(null, statementQueryService);
+            ReportController controller = new ReportController(null, statementQueryService, null, null, null);
             when(statementQueryService.getStatements(eq(99L), eq(7L)))
                     .thenReturn(Mono.error(new BusinessException(
                             org.springframework.http.HttpStatus.NOT_FOUND,

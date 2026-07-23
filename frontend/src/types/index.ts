@@ -131,3 +131,46 @@ export interface ReportDetail {
   pdfObjectKey: string
   createdAt: string
 }
+
+/** GET /reports/{reportId}/checks 响应单条 — accounting_check 表 */
+export interface AccountingCheck {
+  id: number
+  ruleName: string
+  ruleType: string
+  expected: number | null
+  actual: number | null
+  diff: number | null
+  isPass: boolean | null
+  severity: string
+  note: string
+  createdAt: string
+}
+
+/** GET /reports/{reportId}/anomalies 响应单条 — anomaly 表 */
+export interface AnomalyRecord {
+  id: number
+  itemName: string
+  anomalyType: string
+  metricValue: number | null
+  threshold: number | null
+  description: string
+  severity: string
+  createdAt: string
+}
+
+/** GET /reports/{reportId}/artifacts 响应单条 — report_artifact 表 */
+export interface ReportArtifact {
+  id: number
+  artifactType: 'PDF' | 'MARKDOWN' | 'CHART_PIE' | 'CHART_LINE' | 'CHART_BAR' | string
+  objectKey: string
+  status: 'GENERATED' | 'FAILED' | string
+  downloadUrl: string
+  createdAt: string
+}
+
+/** 报告页需要的产物分组（由 ReportViewer 消费） */
+export interface ReportArtifacts {
+  pdf: ReportArtifact | null
+  markdown: ReportArtifact | null
+  charts: ReportArtifact[]
+}

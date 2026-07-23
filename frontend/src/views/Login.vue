@@ -263,9 +263,9 @@ async function submit(): Promise<void> {
 .panel__card {
   width: 100%;
   max-width: 400px;
-  background: var(--fin-card-bg);
+  background: var(--fin-surface);
   border: 1px solid var(--fin-border);
-  border-radius: var(--fin-radius);
+  border-radius: var(--fin-radius-lg);
   box-shadow: var(--fin-shadow-md);
   padding: 32px 32px 24px;
 }

@@ -39,6 +39,7 @@ import com.finreport.mq.TaskMessageProducer;
 import com.finreport.repository.ReportRepository;
 import com.finreport.repository.TaskRepository;
 import com.finreport.repository.TaskStepRepository;
+import com.finreport.service.artifact.ReportArtifactWriter;
 import com.finreport.service.reasoner.CheckResultWriter;
 import com.finreport.service.statement.StatementWriter;
 import com.finreport.trace.TraceContext;
@@ -87,6 +88,9 @@ class TaskOrchestratorTest {
     private CheckResultWriter checkResultWriter;
 
     @Mock
+    private ReportArtifactWriter reportArtifactWriter;
+
+    @Mock
     private ReportRepository reportRepo;
 
     private TaskStateMachine stateMachine;
@@ -98,7 +102,7 @@ class TaskOrchestratorTest {
         orchestrator = new TaskOrchestrator(
                 taskRepo, stepRepo, stateMachine, messageProducer, databaseClient, transactionalOperator,
                 extractDispatcher, extractTracker, statementWriter, extractCacheService,
-                checkResultWriter, reportRepo);
+                checkResultWriter, reportArtifactWriter, reportRepo);
         // M2.09: StatementWriter returns 0 by default; individual tests override when needed.
         lenient().when(statementWriter.writeStatement(anyString(), anyString(), any()))
                 .thenReturn(Mono.just(0));
@@ -109,6 +113,9 @@ class TaskOrchestratorTest {
                 .thenReturn(Mono.empty());
         // M3.04: CheckResultWriter returns 0 by default; individual tests override when needed.
         lenient().when(checkResultWriter.writeCheckResult(anyString(), any()))
+                .thenReturn(Mono.just(0));
+        // M3.08: ReportArtifactWriter returns 0 by default; individual tests override when needed.
+        lenient().when(reportArtifactWriter.writeArtifacts(anyString(), any()))
                 .thenReturn(Mono.just(0));
     }
 
@@ -554,6 +561,57 @@ class TaskOrchestratorTest {
                         assertNotNull(saved.getFinishedAt());
                     })
                     .verifyComplete();
+        }
+
+        @Test
+        @DisplayName("should invoke ReportArtifactWriter before completing on REPORT SUCCESS")
+        void shouldInvokeReportArtifactWriterOnReportSuccess() {
+            // M3.08: REPORT step SUCCESS 必须先调 ReportArtifactWriter.writeArtifacts
+            // 再推进到 COMPLETED。验证 writer 被调用 + 仍然返回 COMPLETED 状态。
+            Task task = Task.builder().id("task-report-writer").status(TaskStatus.REPORT_RUNNING.name())
+                    .progress(75).payload("{\"pdfObjectKey\":\"uploads/7/report.pdf\"}").build();
+            TaskStep step = TaskStep.builder().taskId(task.getId()).stepName("REPORT")
+                    .status(StepStatus.RUNNING.name()).build();
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "REPORT")).thenReturn(Mono.just(step));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            // writer 返回非零计数模拟成功
+            when(reportArtifactWriter.writeArtifacts(eq(task.getId()), any()))
+                    .thenReturn(Mono.just(5));
+
+            StepVerifier.create(orchestrator.handleStepProgress(
+                            task.getId(), "REPORT", "SUCCESS",
+                            java.util.Map.of("pdf_b64", "JVBERi0xLjQK")))
+                    .assertNext(saved -> {
+                        assertEquals(TaskStatus.COMPLETED.name(), saved.getStatus());
+                        assertEquals(100, saved.getProgress());
+                    })
+                    .verifyComplete();
+
+            // 验证 writer 被调用一次，参数为 taskId + 含 pdf_b64 的 result
+            verify(reportArtifactWriter, times(1)).writeArtifacts(eq(task.getId()), any());
+        }
+
+        @Test
+        @DisplayName("should complete task even if ReportArtifactWriter returns 0")
+        void shouldCompleteTaskEvenIfArtifactWriterReturnsZero() {
+            // M3.08: writer 失败返回 0 不阻断状态机推进（spec §8.4 失败不强制回滚）。
+            Task task = Task.builder().id("task-writer-failed").status(TaskStatus.REPORT_RUNNING.name())
+                    .progress(75).payload("{}").build();
+            TaskStep step = TaskStep.builder().taskId(task.getId()).stepName("REPORT")
+                    .status(StepStatus.RUNNING.name()).build();
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "REPORT")).thenReturn(Mono.just(step));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(taskRepo.save(any(Task.class))).thenAnswer(invocation -> Mono.just(invocation.getArgument(0)));
+            when(reportArtifactWriter.writeArtifacts(anyString(), any())).thenReturn(Mono.just(0));
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "REPORT", "SUCCESS", Map.of()))
+                    .assertNext(saved -> assertEquals(TaskStatus.COMPLETED.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            verify(reportArtifactWriter, times(1)).writeArtifacts(anyString(), any());
         }
 
         @Test

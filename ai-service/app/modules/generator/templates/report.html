@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>{{ report_title }}</title>
+  <style>
+    /* ============ 页面规格（A4 / Letter 等，由 PdfConverter 传入） ============ */
+    @page {
+      size: {{ page_size }};
+      margin: 20mm 18mm 20mm 18mm;
+      @bottom-center {
+        content: counter(page) " / " counter(pages);
+        font-size: 9pt;
+        color: #888;
+      }
+    }
+
+    /* ============ 全局字体 / 颜色 ============ */
+    body {
+      font-family: "Noto Sans CJK SC", "Microsoft YaHei", "SimHei",
+                   "WenQuanYi Zen Hei", "DejaVu Sans", sans-serif;
+      font-size: 10.5pt;
+      line-height: 1.6;
+      color: #222;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* ============ 报告标题 ============ */
+    .report-header {
+      text-align: center;
+      margin-bottom: 18pt;
+      padding-bottom: 10pt;
+      border-bottom: 2pt solid #2E86AB;
+    }
+    .report-header h1 {
+      font-size: 18pt;
+      color: #2E86AB;
+      margin: 0 0 6pt 0;
+    }
+    .report-header .meta {
+      font-size: 9pt;
+      color: #666;
+    }
+
+    /* ============ 5 段报告正文 ============ */
+    h1.section-title {
+      font-size: 13pt;
+      color: #2E86AB;
+      border-left: 4pt solid #2E86AB;
+      padding-left: 8pt;
+      margin-top: 18pt;
+      margin-bottom: 8pt;
+      page-break-after: avoid;
+    }
+
+    .section-content {
+      margin: 0 0 14pt 0;
+      text-align: justify;
+    }
+
+    .section-content h2 {
+      font-size: 11pt;
+      color: #444;
+      margin: 10pt 0 4pt 0;
+      page-break-after: avoid;
+    }
+
+    .section-content h3 {
+      font-size: 10.5pt;
+      color: #555;
+      margin: 8pt 0 4pt 0;
+      page-break-after: avoid;
+    }
+
+    .section-content p {
+      margin: 4pt 0;
+    }
+
+    /* ============ 表格（Markdown table → HTML table） ============ */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8pt 0;
+      font-size: 9.5pt;
+      page-break-inside: avoid;
+    }
+    th, td {
+      border: 0.5pt solid #bbb;
+      padding: 4pt 6pt;
+      text-align: left;
+    }
+    th {
+      background-color: #f0f5f9;
+      color: #2E86AB;
+      font-weight: bold;
+    }
+    tr:nth-child(even) {
+      background-color: #fafafa;
+    }
+
+    /* ============ 列表 ============ */
+    ul, ol {
+      margin: 4pt 0 4pt 18pt;
+      padding: 0;
+    }
+    li {
+      margin: 2pt 0;
+    }
+
+    /* ============ 强调样式 ============ */
+    strong {
+      color: #1a5d8a;
+    }
+    em {
+      color: #666;
+    }
+    code {
+      font-family: "DejaVu Sans Mono", "Consolas", monospace;
+      background-color: #f5f5f5;
+      padding: 1pt 3pt;
+      border-radius: 2pt;
+      font-size: 9pt;
+    }
+
+    /* ============ 图表区域 ============ */
+    .charts-section {
+      margin-top: 20pt;
+      page-break-inside: avoid;
+    }
+    .charts-section h1.section-title {
+      page-break-before: always;
+    }
+    .chart {
+      margin: 12pt 0;
+      text-align: center;
+      page-break-inside: avoid;
+    }
+    .chart img {
+      max-width: 100%;
+      max-height: 90mm;
+      border: 0.5pt solid #ddd;
+      border-radius: 2pt;
+    }
+    .chart .chart-title {
+      font-size: 10pt;
+      color: #666;
+      margin-top: 4pt;
+    }
+    .chart .chart-fallback {
+      font-size: 9pt;
+      color: #c0392b;
+      font-style: italic;
+    }
+
+    /* ============ 报告页脚 ============ */
+    .report-footer {
+      margin-top: 24pt;
+      padding-top: 8pt;
+      border-top: 0.5pt solid #ccc;
+      font-size: 8.5pt;
+      color: #888;
+      text-align: center;
+    }
+
+    /* ============ 降级提示 ============ */
+    .fallback-banner {
+      background-color: #fff3cd;
+      border: 0.5pt solid #ffc107;
+      color: #856404;
+      padding: 6pt 10pt;
+      margin-bottom: 10pt;
+      font-size: 9.5pt;
+      border-radius: 2pt;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="report-header">
+    <h1>{{ report_title }}</h1>
+    <div class="meta">
+      {% if company_name %}{{ company_name }}{% endif %}
+      {% if company_code %} · {{ company_code }}{% endif %}
+      {% if report_period %} · 报告期末日：{{ report_period }}{% endif %}
+      {% if fallback %} · 模板降级生成{% endif %}
+    </div>
+  </div>
+
+  {% if fallback %}
+  <div class="fallback-banner">
+    ⚠ 本报告由模板降级路径生成（LLM 调用失败），5 段齐全但内容较朴素，建议人工复核。
+  </div>
+  {% endif %}
+
+  {% for section in sections %}
+  <h1 class="section-title">{{ section.title }}</h1>
+  <div class="section-content">
+    {{ section.html_content | safe }}
+  </div>
+  {% endfor %}
+
+  {% if charts %}
+  <div class="charts-section">
+    <h1 class="section-title">财务图表</h1>
+    {% for chart in charts %}
+    <div class="chart">
+      <img src="data:image/png;base64,{{ chart.png_b64 }}" alt="{{ chart.title }}" />
+      <div class="chart-title">{{ chart.title }}</div>
+      {% if chart.fallback %}
+      <div class="chart-fallback">图表数据不完整：{{ chart.error }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="report-footer">
+    FinReport Agent 自动生成 · 仅供研究参考，不构成投资建议
+    {% if generated_at %} · {{ generated_at }}{% endif %}
+  </div>
+
+</body>
+</html>

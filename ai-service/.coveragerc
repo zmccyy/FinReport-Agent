@@ -1,0 +1,22 @@
+[run]
+# 强制使用 Python tracer（core = pytrace），避免 coverage C extension tracer
+# 与 numpy C 扩展冲突（Win + numpy 2.x + pytest-cov 已知问题）。
+# Python tracer 性能略低但兼容性更好。
+core = pytrace
+source =
+    app
+omit =
+    */site-packages/numpy/*
+    */site-packages/matplotlib/*
+    */site-packages/PIL/*
+    */site-packages/pillow/*
+    */tests/*
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
