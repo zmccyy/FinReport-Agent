@@ -229,10 +229,7 @@ class NetIncomeToRetainedEarningsRule:
         note = ""
         if not is_pass:
             if adjustments == 0:
-                note = (
-                    "缺盈余公积/应付股利科目，容差放宽到净利润的 5%；"
-                    "差异可能来自分红或盈余公积计提"
-                )
+                note = "缺盈余公积/应付股利科目，容差放宽到净利润的 5%；差异可能来自分红或盈余公积计提"
             else:
                 note = "未分配利润变动与净利润不匹配，需排查分红/盈余公积披露"
 
@@ -336,10 +333,7 @@ class CashFlowVsNetIncomeRule:
         note = ""
         if not is_pass:
             if depreciation == 0:
-                note = (
-                    "缺折旧摊销科目，容差放宽到净利润的 20%；"
-                    "差异可能来自折旧摊销或营运资本变动"
-                )
+                note = "缺折旧摊销科目，容差放宽到净利润的 20%；差异可能来自折旧摊销或营运资本变动"
             else:
                 note = "经营现金流与净利润差异超容差，需排查营运资本变动"
 

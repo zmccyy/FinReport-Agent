@@ -102,12 +102,7 @@ def test_table_recognizer_raises_when_missing_paddle(
 
 def test_html_to_rows_handles_nested_cells() -> None:
     """_html_to_rows extracts cell text from multi-row tables."""
-    html = (
-        "<table>"
-        "<tr><td>H1</td><td>H2</td></tr>"
-        "<tr><td><b>v1</b></td><td>v2</td></tr>"
-        "</table>"
-    )
+    html = "<table><tr><td>H1</td><td>H2</td></tr><tr><td><b>v1</b></td><td>v2</td></tr></table>"
     rows = TableRecognizer._html_to_rows(html)
     assert rows == [["H1", "H2"], ["v1", "v2"]]
 

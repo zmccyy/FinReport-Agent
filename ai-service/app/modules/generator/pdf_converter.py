@@ -386,8 +386,8 @@ def _render_fallback_pdf(
   <h1>⚠ PDF 渲染失败</h1>
   <div class="meta">
     {report_title}
-    {f'· {company_name}' if company_name else ''}
-    {f'· {company_code}' if company_code else ''}
+    {f"· {company_name}" if company_name else ""}
+    {f"· {company_code}" if company_code else ""}
     · 报告期末日：{report.report_period}
   </div>
   <div class="error">

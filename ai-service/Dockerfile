@@ -49,7 +49,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl \
 # in dev to keep the image small and build fast. App modules import them
 # lazily inside functions, so the dev server starts and serves mocked
 # endpoints without them. The full prod stage above installs everything.
+#
+# pyproject.toml declares [build-system] + [tool.setuptools.packages.find],
+# so `pip install -e .` builds an editable install. app/ is COPY'd so
+# setuptools can discover the package at build time; at runtime the dev
+# container mounts the host source over /app/app (read-only) via
+# docker-compose.dev.yml, so edits are picked up without rebuilding.
 COPY pyproject.toml .
+COPY app/ ./app/
 RUN pip install --no-cache-dir -e ".[dev]" minio pymilvus
 
 EXPOSE 8000

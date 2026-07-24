@@ -121,8 +121,7 @@ def _make_sections() -> list[ReportSection]:
             "- 存货环比激增 30%"
         ),
         ReportSectionType.CONCLUSION: (
-            "本期财报整体表现良好，营收与净利润同步增长。\n\n"
-            "建议关注应收账款与存货激增风险。"
+            "本期财报整体表现良好，营收与净利润同步增长。\n\n建议关注应收账款与存货激增风险。"
         ),
     }
     return [
@@ -532,10 +531,7 @@ class TestMarkdownToHtml:
                     section_type=ReportSectionType.STATEMENT_ANALYSIS,
                     title="三表分析",
                     content=(
-                        "| 科目 | 数值 |\n"
-                        "|---|---|\n"
-                        "| 货币资金 | 1500 |\n"
-                        "| 应收账款 | 200 |"
+                        "| 科目 | 数值 |\n|---|---|\n| 货币资金 | 1500 |\n| 应收账款 | 200 |"
                     ),
                 )
             ]
@@ -556,7 +552,7 @@ class TestMarkdownToHtml:
                 ReportSection(
                     section_type=ReportSectionType.FINANCIAL_OVERVIEW,
                     title="财务概览",
-                    content=("**关键指标**：\n\n" "- 营收 1300 亿\n" "- 净利 850 亿"),
+                    content=("**关键指标**：\n\n- 营收 1300 亿\n- 净利 850 亿"),
                 )
             ]
             + _make_sections()[1:],

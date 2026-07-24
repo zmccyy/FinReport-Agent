@@ -221,8 +221,7 @@ class Validator:
                     severity="error",
                     code="invalid_report_period",
                     message=(
-                        "report_period 格式应为 YYYY-MM-DD，"
-                        f"实际为 {statement.report_period!r}"
+                        f"report_period 格式应为 YYYY-MM-DD，实际为 {statement.report_period!r}"
                     ),
                     path="report_period",
                 )
@@ -240,8 +239,7 @@ class Validator:
                     severity="warning",
                     code="invalid_currency",
                     message=(
-                        "currency 应为 ISO 4217 三字母 ASCII 代码，"
-                        f"实际为 {statement.currency!r}"
+                        f"currency 应为 ISO 4217 三字母 ASCII 代码，实际为 {statement.currency!r}"
                     ),
                     path="currency",
                 )
@@ -254,8 +252,7 @@ class Validator:
                     severity="warning",
                     code="unknown_unit",
                     message=(
-                        f"unit 不在常见枚举 {sorted(_VALID_UNITS)} 中："
-                        f"{statement.unit!r}"
+                        f"unit 不在常见枚举 {sorted(_VALID_UNITS)} 中：{statement.unit!r}"
                     ),
                     path="unit",
                 )
@@ -336,8 +333,7 @@ class Validator:
                             severity="warning",
                             code="duplicate_item",
                             message=(
-                                f"科目重复：{item.item}"
-                                f"（前次出现在 index {seen_items[item.item]}）"
+                                f"科目重复：{item.item}（前次出现在 index {seen_items[item.item]}）"
                             ),
                             path=f"{base_path}.item",
                         )

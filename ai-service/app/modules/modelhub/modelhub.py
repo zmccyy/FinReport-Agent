@@ -134,8 +134,7 @@ class ModelHub:
         """
         del texts
         raise AiException(
-            "ModelHub.embed() is not implemented in M2.04; "
-            "bge-small-zh LoRA embedder lands in M5"
+            "ModelHub.embed() is not implemented in M2.04; bge-small-zh LoRA embedder lands in M5"
         )
 
     def route(self, scene: Scene) -> tuple[str, str]:

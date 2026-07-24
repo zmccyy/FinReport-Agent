@@ -33,7 +33,6 @@ from app.schemas.reasoning import (
 )
 from app.schemas.statement import StatementType
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

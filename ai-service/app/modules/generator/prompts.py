@@ -32,7 +32,6 @@ from app.schemas.reasoning import CheckResult
 from app.schemas.report import ReportSectionType
 from app.schemas.statement import FinancialStatement, StatementType
 
-
 _SYSTEM_PROMPT = (
     "你是一名专业的A股财报分析师。任务是基于给定的财报数据、勾稽结果、"
     "异常列表与检索段落，生成一份 5 段式 Markdown 财报分析报告。"
