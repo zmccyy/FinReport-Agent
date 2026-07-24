@@ -200,21 +200,27 @@ class TestAssetStructurePie:
         assert result.width == 800
         assert result.height == 500
 
-    def test_should_fallback_when_balance_sheet_missing(self, renderer: ChartRenderer) -> None:
+    def test_should_fallback_when_balance_sheet_missing(
+        self, renderer: ChartRenderer
+    ) -> None:
         """资产负债表缺失时降级。"""
         result = renderer.render_asset_structure_pie(_statement())
         assert result.fallback is True
         assert "资产负债表数据缺失" in (result.error or "")
         assert result.png_bytes[:8] == _PNG_MAGIC
 
-    def test_should_not_fallback_when_only_other_items(self, renderer: ChartRenderer) -> None:
+    def test_should_not_fallback_when_only_other_items(
+        self, renderer: ChartRenderer
+    ) -> None:
         """资产负债表只有非关键科目时，「其他」切片存在，不降级。"""
         bs = [StatementItem(item="其他应收款", value=1000.0)]
         result = renderer.render_asset_structure_pie(_statement(bs=bs))
         assert result.fallback is False
         assert result.png_bytes[:8] == _PNG_MAGIC
 
-    def test_should_fallback_when_only_total_items(self, renderer: ChartRenderer) -> None:
+    def test_should_fallback_when_only_total_items(
+        self, renderer: ChartRenderer
+    ) -> None:
         """资产负债表只有合计科目（资产总计等）时降级。
 
         合计科目不应被合并到「其他」切片（避免比例重复计算），
@@ -228,7 +234,9 @@ class TestAssetStructurePie:
         assert result.fallback is True
         assert "未找到" in (result.error or "")
 
-    def test_should_exclude_total_items_from_other_slice(self, renderer: ChartRenderer) -> None:
+    def test_should_exclude_total_items_from_other_slice(
+        self, renderer: ChartRenderer
+    ) -> None:
         """「资产总计」不应被合并到「其他」切片，避免比例翻倍。"""
         bs = [
             StatementItem(item="货币资金", value=150000000000.0),  # 1500 亿
@@ -243,7 +251,9 @@ class TestAssetStructurePie:
         total = sum(v for _, v in slices)
         assert total == Decimal("170000000000.0")
 
-    def test_should_fallback_when_all_values_zero(self, renderer: ChartRenderer) -> None:
+    def test_should_fallback_when_all_values_zero(
+        self, renderer: ChartRenderer
+    ) -> None:
         """所有科目值为 0 时降级（无切片可绘制）。"""
         bs = [
             StatementItem(item="货币资金", value=0.0),
@@ -269,13 +279,17 @@ class TestRevenueTrendLine:
         assert result.fallback is False
         assert result.png_bytes[:8] == _PNG_MAGIC
 
-    def test_should_fallback_when_income_statement_missing(self, renderer: ChartRenderer) -> None:
+    def test_should_fallback_when_income_statement_missing(
+        self, renderer: ChartRenderer
+    ) -> None:
         """利润表缺失时降级。"""
         result = renderer.render_revenue_trend_line(_statement())
         assert result.fallback is True
         assert "利润表数据缺失" in (result.error or "")
 
-    def test_should_fallback_when_no_revenue_item(self, renderer: ChartRenderer) -> None:
+    def test_should_fallback_when_no_revenue_item(
+        self, renderer: ChartRenderer
+    ) -> None:
         """利润表存在但无营业收入科目时降级。"""
         is_ = [StatementItem(item="净利润", value=100.0)]
         result = renderer.render_revenue_trend_line(_statement(is_=is_))
@@ -304,13 +318,17 @@ class TestCashFlowBar:
         assert result.fallback is False
         assert result.png_bytes[:8] == _PNG_MAGIC
 
-    def test_should_fallback_when_cash_flow_missing(self, renderer: ChartRenderer) -> None:
+    def test_should_fallback_when_cash_flow_missing(
+        self, renderer: ChartRenderer
+    ) -> None:
         """现金流量表缺失时降级。"""
         result = renderer.render_cash_flow_bar(_statement())
         assert result.fallback is True
         assert "现金流量表数据缺失" in (result.error or "")
 
-    def test_should_fallback_when_no_cash_flow_items(self, renderer: ChartRenderer) -> None:
+    def test_should_fallback_when_no_cash_flow_items(
+        self, renderer: ChartRenderer
+    ) -> None:
         """现金流量表存在但无三类净额科目时降级。"""
         cf = [StatementItem(item="其他与经营活动无关的现金", value=100.0)]
         result = renderer.render_cash_flow_bar(_statement(cf=cf))
@@ -375,21 +393,31 @@ class TestImmutability:
         full_statement: FinancialStatement,
     ) -> None:
         """渲染不应修改原 FinancialStatement。"""
-        original_bs_count = len(full_statement.statements.get(StatementType.BALANCE_SHEET, []))
-        original_is_count = len(full_statement.statements.get(StatementType.INCOME_STATEMENT, []))
-        original_cf_count = len(full_statement.statements.get(StatementType.CASH_FLOW, []))
+        original_bs_count = len(
+            full_statement.statements.get(StatementType.BALANCE_SHEET, [])
+        )
+        original_is_count = len(
+            full_statement.statements.get(StatementType.INCOME_STATEMENT, [])
+        )
+        original_cf_count = len(
+            full_statement.statements.get(StatementType.CASH_FLOW, [])
+        )
         original_period = full_statement.report_period
 
         renderer.render_all(full_statement)
 
         assert (
-            len(full_statement.statements.get(StatementType.BALANCE_SHEET, [])) == original_bs_count
+            len(full_statement.statements.get(StatementType.BALANCE_SHEET, []))
+            == original_bs_count
         )
         assert (
             len(full_statement.statements.get(StatementType.INCOME_STATEMENT, []))
             == original_is_count
         )
-        assert len(full_statement.statements.get(StatementType.CASH_FLOW, [])) == original_cf_count
+        assert (
+            len(full_statement.statements.get(StatementType.CASH_FLOW, []))
+            == original_cf_count
+        )
         assert full_statement.report_period == original_period
 
 

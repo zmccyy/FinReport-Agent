@@ -98,7 +98,11 @@ class BalanceSheetIdentityRule:
 
         all_missing = [
             name
-            for name in (asset_missing_name, liability_missing_name, equity_missing_name)
+            for name in (
+                asset_missing_name,
+                liability_missing_name,
+                equity_missing_name,
+            )
             if name
         ]
         if all_missing:
@@ -182,9 +186,7 @@ class NetIncomeToRetainedEarningsRule:
         )
 
         missing = [
-            name
-            for name in (retained_missing_name, income_missing_name)
-            if name
+            name for name in (retained_missing_name, income_missing_name) if name
         ]
         if missing:
             return RuleResult(
@@ -296,11 +298,7 @@ class CashFlowVsNetIncomeRule:
             StatementType.INCOME_STATEMENT, self.NET_INCOME_SYNONYMS
         )
 
-        missing = [
-            name
-            for name in (ocf_missing_name, income_missing_name)
-            if name
-        ]
+        missing = [name for name in (ocf_missing_name, income_missing_name) if name]
         if missing:
             return RuleResult(
                 rule_type=self.rule_type,

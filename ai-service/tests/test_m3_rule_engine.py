@@ -96,7 +96,9 @@ def moutai_snapshot() -> StatementSnapshot:
 class TestBalanceSheetIdentityRule:
     """规则 1 — 资产 = 负债 + 所有者权益。"""
 
-    def test_should_pass_for_moutai_sample(self, moutai_snapshot: StatementSnapshot) -> None:
+    def test_should_pass_for_moutai_sample(
+        self, moutai_snapshot: StatementSnapshot
+    ) -> None:
         """茅台样本：280亿 = 60亿 + 220亿，规则 1 应通过。"""
         rule = BalanceSheetIdentityRule()
         result = rule.check(moutai_snapshot)
@@ -246,7 +248,9 @@ class TestNetIncomeToRetainedEarningsRule:
 class TestCashFlowVsNetIncomeRule:
     """规则 3 — 经营现金流 ≈ 净利润 + 折旧摊销。"""
 
-    def test_should_pass_for_moutai_sample(self, moutai_snapshot: StatementSnapshot) -> None:
+    def test_should_pass_for_moutai_sample(
+        self, moutai_snapshot: StatementSnapshot
+    ) -> None:
         """茅台样本：CF 900亿 vs NI 850亿，差 50亿 < 5%（42.5亿）...
 
         实际差异 50亿 > 5% 阈值 42.5亿，应 WARN 失败。
@@ -279,7 +283,9 @@ class TestCashFlowVsNetIncomeRule:
         """无折旧摊销时差异 30% 应失败。"""
         snapshot = _snapshot(
             is_={"净利润": Decimal("85000000000.0")},
-            cf={"经营活动产生的现金流量净额": Decimal("200000000000.0")},  # 200亿，差 135%
+            cf={
+                "经营活动产生的现金流量净额": Decimal("200000000000.0")
+            },  # 200亿，差 135%
         )
         rule = CashFlowVsNetIncomeRule()
         result = rule.check(snapshot)
@@ -310,7 +316,9 @@ class TestCashFlowVsNetIncomeRule:
 class TestRuleEngine:
     """RuleEngine 聚合测试。"""
 
-    def test_should_run_all_three_rules(self, moutai_snapshot: StatementSnapshot) -> None:
+    def test_should_run_all_three_rules(
+        self, moutai_snapshot: StatementSnapshot
+    ) -> None:
         """茅台样本：3 条规则全部执行；规则 1/3 通过，规则 2 CRITICAL。"""
         engine = RuleEngine()
         result = engine.check(moutai_snapshot)
@@ -458,7 +466,9 @@ class TestStatementSnapshotConversion:
         )
         assert snapshot.get(StatementType.CASH_FLOW, "不存在") is None
 
-    def test_to_dict_should_be_json_serializable(self, moutai_snapshot: StatementSnapshot) -> None:
+    def test_to_dict_should_be_json_serializable(
+        self, moutai_snapshot: StatementSnapshot
+    ) -> None:
         """CheckResult.to_dict 应可 JSON 序列化（L3 → L2 progress payload）。"""
         import json
 

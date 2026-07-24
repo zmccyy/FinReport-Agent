@@ -61,7 +61,9 @@ class ChartSpec(BaseModel):
     """
 
     chart_type: ChartType
-    title: str = Field(default="", description="图表标题；默认对齐 ChartType.chinese_name")
+    title: str = Field(
+        default="", description="图表标题；默认对齐 ChartType.chinese_name"
+    )
 
     def resolve_title(self) -> str:
         """返回标题；空时回退到 ``ChartType.chinese_name``。"""

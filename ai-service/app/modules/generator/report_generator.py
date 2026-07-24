@@ -472,7 +472,9 @@ def _build_fallback_report(
     # 5. 结论
     conclusion_lines: list[str] = []
     if check_result.all_pass:
-        conclusion_lines.append("本期财报勾稽规则全部通过、未检出异常，整体财务数据一致性良好。")
+        conclusion_lines.append(
+            "本期财报勾稽规则全部通过、未检出异常，整体财务数据一致性良好。"
+        )
     else:
         failed = sum(1 for r in check_result.rules if not r.is_pass)
         conclusion_lines.append(
@@ -509,7 +511,11 @@ def _summarize_key_metrics(statement: FinancialStatement) -> dict[str, str]:
             ["所有者权益合计", "股东权益合计", "净资产"],
         ),
         ("营业收入", StatementType.INCOME_STATEMENT, ["营业收入", "营业总收入"]),
-        ("净利润", StatementType.INCOME_STATEMENT, ["净利润", "归属于母公司股东的净利润"]),
+        (
+            "净利润",
+            StatementType.INCOME_STATEMENT,
+            ["净利润", "归属于母公司股东的净利润"],
+        ),
         (
             "经营活动现金流量净额",
             StatementType.CASH_FLOW,

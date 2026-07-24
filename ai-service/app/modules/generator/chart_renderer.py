@@ -565,7 +565,9 @@ def _find_item_value(items: list[StatementItem], synonyms: list[str]) -> Decimal
     """
     if not synonyms:
         return None
-    name_to_value: dict[str, Decimal] = {item.item: Decimal(str(item.value)) for item in items}
+    name_to_value: dict[str, Decimal] = {
+        item.item: Decimal(str(item.value)) for item in items
+    }
     for name in synonyms:
         if name in name_to_value:
             return name_to_value[name]

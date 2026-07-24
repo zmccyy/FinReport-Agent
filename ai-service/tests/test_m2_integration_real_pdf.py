@@ -122,10 +122,30 @@ def _preset_bs_json() -> str:
             "unit": "元",
             "statements": {
                 "balance_sheet": [
-                    {"item": "货币资金", "value": 59000000000.0, "scope": "合并", "period": "本期"},
-                    {"item": "资产总计", "value": 280000000000.0, "scope": "合并", "period": "本期"},
-                    {"item": "负债合计", "value": 60000000000.0, "scope": "合并", "period": "本期"},
-                    {"item": "所有者权益合计", "value": 220000000000.0, "scope": "合并", "period": "本期"},
+                    {
+                        "item": "货币资金",
+                        "value": 59000000000.0,
+                        "scope": "合并",
+                        "period": "本期",
+                    },
+                    {
+                        "item": "资产总计",
+                        "value": 280000000000.0,
+                        "scope": "合并",
+                        "period": "本期",
+                    },
+                    {
+                        "item": "负债合计",
+                        "value": 60000000000.0,
+                        "scope": "合并",
+                        "period": "本期",
+                    },
+                    {
+                        "item": "所有者权益合计",
+                        "value": 220000000000.0,
+                        "scope": "合并",
+                        "period": "本期",
+                    },
                 ]
             },
         },
@@ -142,8 +162,18 @@ def _preset_is_json() -> str:
             "unit": "元",
             "statements": {
                 "income_statement": [
-                    {"item": "营业收入", "value": 170000000000.0, "scope": "合并", "period": "本期"},
-                    {"item": "净利润", "value": 85000000000.0, "scope": "合并", "period": "本期"},
+                    {
+                        "item": "营业收入",
+                        "value": 170000000000.0,
+                        "scope": "合并",
+                        "period": "本期",
+                    },
+                    {
+                        "item": "净利润",
+                        "value": 85000000000.0,
+                        "scope": "合并",
+                        "period": "本期",
+                    },
                 ]
             },
         },
@@ -207,7 +237,10 @@ def parser_no_paddle() -> DocumentParser:
     ids=[c[2] for c in REAL_PDFS],
 )
 def test_real_pdf_parses_with_text_layer(
-    filename: str, company_code: str, company_name: str, parser_no_paddle: DocumentParser
+    filename: str,
+    company_code: str,
+    company_name: str,
+    parser_no_paddle: DocumentParser,
 ) -> None:
     """Each real annual report must parse with page_count > 0 and text content.
 
@@ -228,10 +261,10 @@ def test_real_pdf_parses_with_text_layer(
     text_pages = [p for p in document.pages if p.text_blocks]
     assert len(text_pages) > 0, f"{company_name} 必须有文本页"
     # 验证至少一个文本块有内容
-    total_text_chars = sum(
-        len(b.text) for p in document.pages for b in p.text_blocks
-    )
-    assert total_text_chars > 1000, f"{company_name} 文本总量应 > 1000 字符，实际 {total_text_chars}"
+    total_text_chars = sum(len(b.text) for p in document.pages for b in p.text_blocks)
+    assert (
+        total_text_chars > 1000
+    ), f"{company_name} 文本总量应 > 1000 字符，实际 {total_text_chars}"
 
 
 # ---------------------------------------------------------------------------
@@ -340,9 +373,7 @@ def test_three_statement_pipeline_with_mock_llm(real_pdf_paths: list[Path]) -> N
     with stub responses so the test runs on CPU-only environments.
     """
     # 茅台 PDF 跑三表
-    moutai_pdf = next(
-        (p for p in real_pdf_paths if "600519" in p.name), None
-    )
+    moutai_pdf = next((p for p in real_pdf_paths if "600519" in p.name), None)
     if moutai_pdf is None:
         pytest.skip("moutai PDF missing")
 
@@ -387,8 +418,10 @@ def test_three_statement_pipeline_with_mock_llm(real_pdf_paths: list[Path]) -> N
 
     # 三表合计 4 + 2 + 1 = 7 项科目
     bs_count = len(bs_result.statement.statements.get(StatementType.BALANCE_SHEET, []))
-    is_count = len(is_result.statement.statements.get(StatementType.INCOME_STATEMENT, []))
-    cf_count = len(cf_result.statement.statements.get(StatementType.CASH_FLOW, []))
-    assert bs_count + is_count + cf_count == 7, (
-        f"三表合计应 7 项（BS 4 + IS 2 + CF 1），实际 BS={bs_count} IS={is_count} CF={cf_count}"
+    is_count = len(
+        is_result.statement.statements.get(StatementType.INCOME_STATEMENT, [])
     )
+    cf_count = len(cf_result.statement.statements.get(StatementType.CASH_FLOW, []))
+    assert (
+        bs_count + is_count + cf_count == 7
+    ), f"三表合计应 7 项（BS 4 + IS 2 + CF 1），实际 BS={bs_count} IS={is_count} CF={cf_count}"

@@ -32,7 +32,16 @@ jobs:
           cache-dependency-path: ai-service/pyproject.toml
 
       - name: Install development dependencies
-        run: python -m pip install --upgrade pip && python -m pip install ".[prod,dev]"
+        # Install only the dev extras + the lightweight clients needed by the
+        # init-script tests (minio, pymilvus). The heavy prod dependencies
+        # (paddlepaddle, torch, transformers, weasyprint, ...) are intentionally
+        # skipped: app modules import them lazily inside functions, so ruff,
+        # black and pytest (with mocks) can run without them. This cuts install
+        # time from ~10 min to ~1 min and avoids intermittent wheel-build
+        # failures on the ubuntu runner.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" minio pymilvus
 
       - name: Check lint and formatting
         run: |

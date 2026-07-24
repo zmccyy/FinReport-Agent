@@ -160,13 +160,17 @@ class AnomalyDetector:
         anomalies: list[Anomaly] = []
 
         if year_ago is not None:
-            anomalies.extend(self._detect_changes(current, year_ago, AnomalyType.YOY_CHANGE))
+            anomalies.extend(
+                self._detect_changes(current, year_ago, AnomalyType.YOY_CHANGE)
+            )
             anomalies.extend(
                 self._detect_logic_conflicts(current, year_ago, AnomalyType.YOY_CHANGE)
             )
 
         if previous is not None:
-            anomalies.extend(self._detect_changes(current, previous, AnomalyType.QOQ_CHANGE))
+            anomalies.extend(
+                self._detect_changes(current, previous, AnomalyType.QOQ_CHANGE)
+            )
             anomalies.extend(
                 self._detect_logic_conflicts(current, previous, AnomalyType.QOQ_CHANGE)
             )
@@ -304,14 +308,18 @@ class AnomalyDetector:
         revenue_ratio = self._item_ratio(
             current, comparison, StatementType.INCOME_STATEMENT, REVENUE_SYNONYMS
         )
-        ar_ratio = self._item_ratio(current, comparison, StatementType.BALANCE_SHEET, AR_SYNONYMS)
+        ar_ratio = self._item_ratio(
+            current, comparison, StatementType.BALANCE_SHEET, AR_SYNONYMS
+        )
         inventory_ratio = self._item_ratio(
             current, comparison, StatementType.BALANCE_SHEET, INVENTORY_SYNONYMS
         )
         ni_ratio = self._item_ratio(
             current, comparison, StatementType.INCOME_STATEMENT, NET_INCOME_SYNONYMS
         )
-        ocf_ratio = self._item_ratio(current, comparison, StatementType.CASH_FLOW, OCF_SYNONYMS)
+        ocf_ratio = self._item_ratio(
+            current, comparison, StatementType.CASH_FLOW, OCF_SYNONYMS
+        )
 
         type_label = anomaly_type.chinese_name
 
@@ -431,7 +439,9 @@ class AnomalyDetector:
             ``Anomaly`` 实例；逻辑异常 ``severity=ERROR``，``metric_value``
             取首个 ratio 便于落表后排序。
         """
-        ratio_parts = ", ".join(f"{name}={ratio * 100:.1f}%" for name, ratio in ratios.items())
+        ratio_parts = ", ".join(
+            f"{name}={ratio * 100:.1f}%" for name, ratio in ratios.items()
+        )
         description = f"{rule_name}（{type_label}：{ratio_parts}）"
         first_ratio = next(iter(ratios.values()), None)
         return Anomaly(

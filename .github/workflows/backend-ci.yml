@@ -35,13 +35,27 @@ jobs:
         run: chmod +x mvnw
 
       - name: Run unit tests
-        run: ./mvnw test
+        # -Djacoco.skip=true avoids offline-instrumenting target/classes during
+        # the test phase. JaCoCo's restore-instrumented-classes goal is bound
+        # to post-integration-test, so `mvn test` alone would leave target/classes
+        # instrumented and cause the subsequent `mvn verify` to fail with
+        # "Cannot process instrumented class". Coverage data is collected in the
+        # next step instead.
+        run: ./mvnw test -Djacoco.skip=true
 
       - name: Enforce coverage gate
+        # Runs unit tests again with JaCoCo offline instrumentation enabled:
+        # initialize -> instrument, test -> run tests, post-integration-test ->
+        # restore, verify -> report + check (>= 80% LINE coverage on core packages).
         run: ./mvnw verify
 
       - name: Run static analysis
         run: ./mvnw checkstyle:check spotbugs:check
 
       - name: Run Testcontainers integration tests
-        run: ./mvnw verify -Pintegration
+        # -DskipTests skips surefire unit tests (already covered above).
+        # -Djacoco.skip=true avoids re-instrumenting target/classes (the
+        # previous `mvn verify` already restored them) and skips the coverage
+        # check (coverage data from unit tests is what we want to enforce).
+        # Failsafe integration tests (*IT.java) still run via the integration profile.
+        run: ./mvnw verify -Pintegration -DskipTests -Djacoco.skip=true

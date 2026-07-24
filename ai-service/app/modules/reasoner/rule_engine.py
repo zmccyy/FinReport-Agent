@@ -86,9 +86,7 @@ class RuleEngine:
             try:
                 result = rule.check(snapshot)
             except Exception as exc:  # noqa: BLE001 — 规则异常不阻断引擎
-                LOGGER.exception(
-                    "[RuleEngine] 规则执行异常 rule_type=%s", rule_type
-                )
+                LOGGER.exception("[RuleEngine] 规则执行异常 rule_type=%s", rule_type)
                 result = RuleResult(
                     rule_type=rule_type,
                     rule_name=rule_type.chinese_name,

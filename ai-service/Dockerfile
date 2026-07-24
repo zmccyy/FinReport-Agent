@@ -44,8 +44,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Install only dev extras + lightweight clients. Heavy prod dependencies
+# (paddlepaddle, torch, transformers, weasyprint, matplotlib, ...) are skipped
+# in dev to keep the image small and build fast. App modules import them
+# lazily inside functions, so the dev server starts and serves mocked
+# endpoints without them. The full prod stage above installs everything.
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[prod]"
+RUN pip install --no-cache-dir -e ".[dev]" minio pymilvus
 
 EXPOSE 8000
 

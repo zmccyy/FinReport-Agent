@@ -53,11 +53,15 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Start development stack
+        # --wait-timeout 600 gives the ai-service container enough time to
+        # build its dev image (pip install) and pass the healthcheck. The
+        # previous 300s timeout was too tight on cold CI runners where Docker
+        # layer caching is unavailable.
         run: >-
           docker compose -p finreport-ci
           -f deploy/docker-compose.yml
           -f deploy/docker-compose.dev.yml
-          up -d --build --wait --wait-timeout 300
+          up -d --build --wait --wait-timeout 600
 
       - name: Run Playwright smoke test
         run: python scripts/e2e_m116.py

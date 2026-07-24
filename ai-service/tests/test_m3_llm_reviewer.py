@@ -356,7 +356,9 @@ class TestReviewSuccess:
 
     def test_should_append_manual_review_hint_when_not_explained(self) -> None:
         """is_explained=false 时 note 应追加"建议人工排查"。"""
-        hub = _StubHub(response_text='{"reason": "无法定位差异来源", "is_explained": false}')
+        hub = _StubHub(
+            response_text='{"reason": "无法定位差异来源", "is_explained": false}'
+        )
         reviewer = LLMReviewer(hub)
         check = CheckResult(
             rules=[_make_rule_result()],
@@ -371,7 +373,9 @@ class TestReviewSuccess:
 
     def test_should_parse_json_with_code_fence(self) -> None:
         """LLM 输出含 ```json 围栏时应能解析。"""
-        hub = _StubHub(response_text='```json\n{"reason": "围栏测试", "is_explained": true}\n```')
+        hub = _StubHub(
+            response_text='```json\n{"reason": "围栏测试", "is_explained": true}\n```'
+        )
         reviewer = LLMReviewer(hub)
         check = CheckResult(
             rules=[_make_rule_result()],

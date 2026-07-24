@@ -97,7 +97,9 @@ class RuleResult(BaseModel):
     diff: Decimal | None = Field(default=None, description="actual - expected")
     is_pass: bool = Field(description="|diff| <= tolerance 时为 True")
     severity: Severity = Field(default=Severity.INFO)
-    tolerance: Decimal = Field(default=Decimal("0.01"), description="浮点比较容差（元）")
+    tolerance: Decimal = Field(
+        default=Decimal("0.01"), description="浮点比较容差（元）"
+    )
     note: str = Field(default="", description="差异原因；M3.01 留空，M3.02 LLM 回填")
     missing_items: list[str] = Field(
         default_factory=list,
@@ -127,7 +129,9 @@ class Anomaly(BaseModel):
     """
 
     item_name: str = Field(description="异常科目名")
-    anomaly_type: str = Field(description="异常类型：yoy_change / qoq_change / logic_conflict")
+    anomaly_type: str = Field(
+        description="异常类型：yoy_change / qoq_change / logic_conflict"
+    )
     metric_value: Decimal | None = Field(default=None, description="异常指标值")
     threshold: Decimal | None = Field(default=None, description="触发阈值")
     description: str = Field(default="", description="异常描述")

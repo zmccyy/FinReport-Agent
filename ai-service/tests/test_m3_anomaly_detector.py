@@ -247,7 +247,9 @@ class TestDetectYoYChange:
 
     def test_item_missing_in_comparison_skipped(self) -> None:
         """对比期无此科目（本期新增）— 跳过。"""
-        current = _make_snapshot(bs={"货币资金": Decimal("200"), "新增科目": Decimal("999")})
+        current = _make_snapshot(
+            bs={"货币资金": Decimal("200"), "新增科目": Decimal("999")}
+        )
         year_ago = _make_snapshot(bs={"货币资金": Decimal("100")})
 
         anomalies = AnomalyDetector().detect(current, year_ago=year_ago)
@@ -268,7 +270,9 @@ class TestDetectYoYChange:
 
         anomalies = AnomalyDetector().detect(current, year_ago=year_ago)
         # 3 个变动异常 + 0 个逻辑异常（同向增长不触发逻辑冲突）。
-        change_anomalies = [a for a in anomalies if a.anomaly_type == AnomalyType.YOY_CHANGE.value]
+        change_anomalies = [
+            a for a in anomalies if a.anomaly_type == AnomalyType.YOY_CHANGE.value
+        ]
         assert len(change_anomalies) == 3
 
 
@@ -297,7 +301,9 @@ class TestDetectQoQChange:
         previous = _make_snapshot(bs={"货币资金": Decimal("100")})
         year_ago = _make_snapshot(bs={"货币资金": Decimal("100")})
 
-        anomalies = AnomalyDetector().detect(current, previous=previous, year_ago=year_ago)
+        anomalies = AnomalyDetector().detect(
+            current, previous=previous, year_ago=year_ago
+        )
         yoy = [a for a in anomalies if a.anomaly_type == AnomalyType.YOY_CHANGE.value]
         qoq = [a for a in anomalies if a.anomaly_type == AnomalyType.QOQ_CHANGE.value]
         assert len(yoy) == 1
@@ -647,7 +653,9 @@ class TestImmutability:
         AnomalyDetector().detect(current, year_ago=year_ago)
 
         assert current.statements[StatementType.BALANCE_SHEET] == original_current_bs
-        assert year_ago.statements[StatementType.INCOME_STATEMENT] == original_year_ago_is
+        assert (
+            year_ago.statements[StatementType.INCOME_STATEMENT] == original_year_ago_is
+        )
 
 
 # ============================================================================

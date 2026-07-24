@@ -185,9 +185,11 @@ def _check_result(
 ) -> CheckResult:
     """构造 CheckResult 测试辅助。"""
     return CheckResult(
-        rules=rules
-        if rules is not None
-        else [_make_rule_result(is_pass=True, severity=Severity.INFO)],
+        rules=(
+            rules
+            if rules is not None
+            else [_make_rule_result(is_pass=True, severity=Severity.INFO)]
+        ),
         anomalies=anomalies if anomalies is not None else [],
         confidence=confidence,
         report_period="2025-12-31",
@@ -737,8 +739,12 @@ class TestImmutability:
     ) -> None:
         """generate 不应修改 FinancialStatement。"""
         original_period = maotai_statement.report_period
-        original_bs_count = len(maotai_statement.statements[StatementType.BALANCE_SHEET])
-        original_is_count = len(maotai_statement.statements[StatementType.INCOME_STATEMENT])
+        original_bs_count = len(
+            maotai_statement.statements[StatementType.BALANCE_SHEET]
+        )
+        original_is_count = len(
+            maotai_statement.statements[StatementType.INCOME_STATEMENT]
+        )
         original_cf_count = len(maotai_statement.statements[StatementType.CASH_FLOW])
 
         hub = _StubHub(response_text=_valid_llm_response())
@@ -746,9 +752,18 @@ class TestImmutability:
         _run(gen.generate(maotai_statement, maotai_check))
 
         assert maotai_statement.report_period == original_period
-        assert len(maotai_statement.statements[StatementType.BALANCE_SHEET]) == original_bs_count
-        assert len(maotai_statement.statements[StatementType.INCOME_STATEMENT]) == original_is_count
-        assert len(maotai_statement.statements[StatementType.CASH_FLOW]) == original_cf_count
+        assert (
+            len(maotai_statement.statements[StatementType.BALANCE_SHEET])
+            == original_bs_count
+        )
+        assert (
+            len(maotai_statement.statements[StatementType.INCOME_STATEMENT])
+            == original_is_count
+        )
+        assert (
+            len(maotai_statement.statements[StatementType.CASH_FLOW])
+            == original_cf_count
+        )
 
     def test_should_not_mutate_check_result(
         self,
@@ -1109,7 +1124,11 @@ class TestDefaultsAndEdgeCases:
         ]
         contents = [f"内容{i}" for i in range(5)]
         raw = json.dumps(
-            {"sections": [{"title": t, "content": c} for t, c in zip(titles, contents)]},
+            {
+                "sections": [
+                    {"title": t, "content": c} for t, c in zip(titles, contents)
+                ]
+            },
             ensure_ascii=False,
         )
         hub = _StubHub(response_text=raw)

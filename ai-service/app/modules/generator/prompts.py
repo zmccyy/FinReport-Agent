@@ -211,7 +211,9 @@ def _format_anomalies(check_result: CheckResult) -> str:
         return "(无异常)"
     lines: list[str] = []
     for anomaly in check_result.anomalies:
-        lines.append(f"  - {anomaly.item_name}（{anomaly.anomaly_type}）：{anomaly.severity.value}")
+        lines.append(
+            f"  - {anomaly.item_name}（{anomaly.anomaly_type}）：{anomaly.severity.value}"
+        )
         if anomaly.description:
             lines.append(f"    描述：{anomaly.description}")
     return "\n".join(lines)

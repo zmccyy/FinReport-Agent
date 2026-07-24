@@ -298,9 +298,7 @@ class TestConvertSuccess:
         mock_weasyprint: bytes,
     ) -> None:
         """无图表时也能渲染 PDF。"""
-        result = asyncio.run(
-            converter.convert(report, None, company_name="贵州茅台")
-        )
+        result = asyncio.run(converter.convert(report, None, company_name="贵州茅台"))
         assert result.fallback is False
         assert result.chart_count == 0
         assert len(result.pdf_bytes) > 0
@@ -374,9 +372,7 @@ class TestConvertFallback:
 
         monkeypatch.setattr("weasyprint.HTML", _FailingHTML)
 
-        result = asyncio.run(
-            converter.convert(report, charts, company_name="贵州茅台")
-        )
+        result = asyncio.run(converter.convert(report, charts, company_name="贵州茅台"))
         assert result.fallback is True
         assert "WeasyPrint 渲染失败" in (result.error or "")
         assert result.chart_count == 3  # chart_count 仍透传
@@ -560,11 +556,7 @@ class TestMarkdownToHtml:
                 ReportSection(
                     section_type=ReportSectionType.FINANCIAL_OVERVIEW,
                     title="财务概览",
-                    content=(
-                        "**关键指标**：\n\n"
-                        "- 营收 1300 亿\n"
-                        "- 净利 850 亿"
-                    ),
+                    content=("**关键指标**：\n\n" "- 营收 1300 亿\n" "- 净利 850 亿"),
                 )
             ]
             + _make_sections()[1:],
@@ -735,9 +727,7 @@ class TestDefaultsAndEdgeCases:
         report: ReportResult,
     ) -> None:
         """HTML 模板中 @page size 使用传入的 page_size。"""
-        html_str = converter._render_html(
-            report, [], company_name="", company_code=""
-        )
+        html_str = converter._render_html(report, [], company_name="", company_code="")
         # 默认 A4 渲染到 @page size
         assert "size: A4" in html_str
 
