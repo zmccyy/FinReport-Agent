@@ -57,6 +57,15 @@ dev = [
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.lint]
+# Pin the rule set to the historical ruff default (E4, E7, E9 + F). This is
+# exactly what ruff checked before any [tool.ruff.lint] section existed, so
+# committing this config does not introduce new violations. Pinning prevents
+# future ruff versions (0.13+) from silently expanding the default selection
+# and breaking CI. Add rules explicitly here when the project adopts them.
+select = ["E4", "E7", "E9", "F"]
+ignore = []
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]
