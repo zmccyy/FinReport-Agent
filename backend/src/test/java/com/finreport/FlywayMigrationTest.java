@@ -29,10 +29,10 @@ class FlywayMigrationTest {
             "^\\s{2}(\\w+)\\s+", Pattern.MULTILINE);
 
     @Test
-    @DisplayName("所有 6 个迁移文件存在")
+    @DisplayName("所有 8 个迁移文件存在")
     void shouldHaveSixMigrationFiles() {
         List<String> files = listMigrationFiles();
-        assertEquals(6, files.size(), "应有 6 个迁移文件");
+        assertEquals(8, files.size(), "应有 8 个迁移文件");
         assertTrue(files.contains("V1__init_user.sql"), "缺少 V1__init_user.sql");
         assertTrue(files.contains("V2__init_report.sql"), "缺少 V2__init_report.sql");
         assertTrue(files.contains("V3__init_task.sql"), "缺少 V3__init_task.sql");
@@ -40,6 +40,10 @@ class FlywayMigrationTest {
         assertTrue(files.contains("V5__init_indexes.sql"), "缺少 V5__init_indexes.sql");
         assertTrue(files.contains("V6__m1_reliability_hardening.sql"),
                 "缺少 V6__m1_reliability_hardening.sql");
+        assertTrue(files.contains("V7__expand_accounting_check_rule_type.sql"),
+                "缺少 V7__expand_accounting_check_rule_type.sql");
+        assertTrue(files.contains("V8__expand_task_datetime_precision.sql"),
+                "缺少 V8__expand_task_datetime_precision.sql");
     }
 
     @Test
@@ -329,7 +333,9 @@ class FlywayMigrationTest {
         // Instead, check each known file exists.
         String[] known = {"V1__init_user.sql", "V2__init_report.sql",
                 "V3__init_task.sql", "V4__init_model_audit.sql", "V5__init_indexes.sql",
-                "V6__m1_reliability_hardening.sql"};
+                "V6__m1_reliability_hardening.sql",
+                "V7__expand_accounting_check_rule_type.sql",
+                "V8__expand_task_datetime_precision.sql"};
         for (String name : known) {
             String path = MIGRATION_DIR + name;
             if (getClass().getClassLoader().getResource(path) != null) {

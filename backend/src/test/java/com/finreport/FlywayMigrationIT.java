@@ -18,16 +18,24 @@ import org.flywaydb.core.Flyway;
 import org.flywaydb.core.api.output.MigrateResult;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Flyway 迁移集成测试：在 Testcontainers MySQL 中执行全新建库及 V5 到 V6 升级。
+ * Flyway 迁移集成测试：在 Testcontainers MySQL 中执行全新建库及 V7 到 V8 升级。
+ *
+ * <p>使用 {@link MethodOrderer.MethodName} 保证测试方法按字母序执行：
+ * {@code shouldEnforceUserScopedDedupe...}（V6，先插入 PDF_MD5 + userId=1）
+ * 必须在 {@code shouldExpandRuleTypeToVarchar32...}（V7，复用同一条 report）
+ * 之前运行，避免唯一约束 uk_report_user_md5 冲突。</p>
  */
 @Testcontainers
+@TestMethodOrder(MethodOrderer.MethodName.class)
 class FlywayMigrationIT {
 
     private static final String USER = "finreport";
@@ -45,19 +53,19 @@ class FlywayMigrationIT {
 
     @BeforeAll
     static void migrateFreshAndUpgradeSchemas() throws SQLException {
-        assertEquals(6, migrate(freshJdbcUrl()).migrationsExecuted,
-                "全新数据库应执行 V1 到 V6 共 6 个迁移");
+        assertEquals(8, migrate(freshJdbcUrl()).migrationsExecuted,
+                "全新数据库应执行 V1 到 V8 共 8 个迁移");
 
-        assertEquals(5, migrateToVersion(upgradeJdbcUrl(), "5").migrationsExecuted,
-                "既有库应先执行 V1 到 V5");
+        assertEquals(7, migrateToVersion(upgradeJdbcUrl(), "7").migrationsExecuted,
+                "既有库应先执行 V1 到 V7");
         assertEquals(1, migrate(upgradeJdbcUrl()).migrationsExecuted,
-                "既有 V5 库升级时应只执行 V6");
+                "既有 V7 库升级时应只执行 V8");
     }
 
     @Test
-    @DisplayName("全新库的迁移历史包含 V1 到 V6")
+    @DisplayName("全新库的迁移历史包含 V1 到 V8")
     void shouldMigrateAllVersionsOnFreshDatabase() throws SQLException {
-        assertEquals(6, countAppliedMigrations(freshJdbcUrl()), "应有 6 条成功迁移历史");
+        assertEquals(8, countAppliedMigrations(freshJdbcUrl()), "应有 8 条成功迁移历史");
     }
 
     @Test
@@ -102,6 +110,100 @@ class FlywayMigrationIT {
                     "同用户同 MD5 必须受唯一约束保护");
             insertReport(connection, "task-three", 2L, PDF_MD5);
             insertReport(connection, "task-one", 1L, "fedcba9876543210fedcba9876543210");
+        }
+    }
+
+    @Test
+    @DisplayName("V7 在全新库和既有 V6 库中均把 accounting_check.rule_type 扩容到 VARCHAR(32)")
+    void shouldExpandRuleTypeToVarchar32OnFreshAndUpgradedDatabases() throws SQLException {
+        for (String jdbcUrl : List.of(freshJdbcUrl(), upgradeJdbcUrl())) {
+            // rule_type 列存在
+            assertTrue(listColumns(jdbcUrl, "accounting_check").contains("rule_type"),
+                    "accounting_check 应包含 rule_type 列");
+
+            // VARCHAR 长度 = 32（CHARACTER_MAXIMUM_LENGTH 反映列定义中的字符长度）
+            try (Connection connection = DriverManager.getConnection(jdbcUrl, USER, PASSWORD);
+                    Statement statement = connection.createStatement();
+                    ResultSet resultSet = statement.executeQuery(
+                            "SELECT CHARACTER_MAXIMUM_LENGTH FROM information_schema.columns "
+                                    + "WHERE table_schema = DATABASE() "
+                                    + "AND table_name = 'accounting_check' "
+                                    + "AND column_name = 'rule_type'")) {
+                assertTrue(resultSet.next(), "应能查到 rule_type 列元数据");
+                assertEquals(32, resultSet.getInt(1),
+                        "rule_type 应扩容到 VARCHAR(32)，实际: " + resultSet.getInt(1));
+                assertFalse(resultSet.next(), "rule_type 元数据应只有一行");
+            }
+
+            // 端到端验证：插入 23 字符的 RuleType.CASH_FLOW_VS_NET_INCOME 不再报 Data too long
+            try (Connection connection = DriverManager.getConnection(jdbcUrl, USER, PASSWORD)) {
+                long reportId = ensureReportForRuleTypeCheck(connection);
+                insertAccountingCheck(connection, reportId,
+                        "cash_flow_vs_net_income", "经营现金流 vs 净利润");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("V8 在全新库和既有 V7 库中均把 task/task_step 的 started_at/finished_at 升级到 DATETIME(3)")
+    void shouldExpandDatetimePrecisionToMillisOnFreshAndUpgradedDatabases() throws SQLException {
+        for (String jdbcUrl : List.of(freshJdbcUrl(), upgradeJdbcUrl())) {
+            // task 与 task_step 两张表
+            for (String table : List.of("task", "task_step")) {
+                for (String column : List.of("started_at", "finished_at")) {
+                    try (Connection connection = DriverManager.getConnection(jdbcUrl, USER, PASSWORD);
+                            Statement statement = connection.createStatement();
+                            ResultSet resultSet = statement.executeQuery(
+                                    "SELECT DATETIME_PRECISION FROM information_schema.columns "
+                                            + "WHERE table_schema = DATABASE() "
+                                            + "AND table_name = '" + table + "' "
+                                            + "AND column_name = '" + column + "'")) {
+                        assertTrue(resultSet.next(),
+                                "应能查到 " + table + "." + column + " 列元数据");
+                        assertEquals(3, resultSet.getInt(1),
+                                table + "." + column + " 应为 DATETIME(3) 毫秒精度，实际: "
+                                        + resultSet.getInt(1));
+                        assertFalse(resultSet.next(),
+                                table + "." + column + " 元数据应只有一行");
+                    }
+                }
+            }
+        }
+    }
+
+    private static long ensureReportForRuleTypeCheck(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery(
+                        "SELECT id FROM report WHERE pdf_md5 = '" + PDF_MD5 + "' LIMIT 1")) {
+            if (resultSet.next()) {
+                return resultSet.getLong(1);
+            }
+        }
+        insertReport(connection, "task-rule-type", 1L, PDF_MD5);
+        try (Statement statement = connection.createStatement();
+                ResultSet resultSet = statement.executeQuery(
+                        "SELECT id FROM report WHERE pdf_md5 = '" + PDF_MD5 + "' LIMIT 1")) {
+            assertTrue(resultSet.next(), "插入 report 后必须能查回 id");
+            return resultSet.getLong(1);
+        }
+    }
+
+    private static void insertAccountingCheck(
+            Connection connection, long reportId, String ruleType, String ruleName)
+            throws SQLException {
+        String sql = "INSERT INTO accounting_check "
+                + "(report_id, rule_name, rule_type, expected, actual, diff, is_pass, severity) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, reportId);
+            statement.setString(2, ruleName);
+            statement.setString(3, ruleType);
+            statement.setBigDecimal(4, new java.math.BigDecimal("1000.00"));
+            statement.setBigDecimal(5, new java.math.BigDecimal("1000.00"));
+            statement.setBigDecimal(6, new java.math.BigDecimal("0.00"));
+            statement.setByte(7, (byte) 1);
+            statement.setString(8, "INFO");
+            statement.executeUpdate();
         }
     }
 
