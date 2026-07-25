@@ -117,15 +117,23 @@ class TestMilvusCollection:
 
     def test_fields_have_eight_entries(self):
         """fin_kb collection 应有恰好 8 个字段。"""
-        source = (SCRIPTS_DIR / "init_milvus.py").read_text(encoding="utf-8")
-        # 统计 FieldSchema 出现次数
-        field_count = source.count("FieldSchema(name=")
-        assert field_count == 8, f"期望 8 个字段，实际 {field_count}"
+        # 加载模块读取 FIELD_SPECS 长度（dry-run 模式零依赖，可安全加载）
+        module_path = SCRIPTS_DIR / "init_milvus.py"
+        spec = importlib.util.spec_from_file_location(
+            "finreport_init_milvus_fields", module_path
+        )
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        assert (
+            len(module.FIELD_SPECS) == 8
+        ), f"期望 8 个字段，实际 {len(module.FIELD_SPECS)}"
 
     def test_embedding_dim_is_512(self):
         """embedding 向量维度应为 512（bge-small 输出）。"""
         source = (SCRIPTS_DIR / "init_milvus.py").read_text(encoding="utf-8")
-        assert "dim=512" in source, "embedding 维度应为 512"
+        assert '"dim": 512' in source, "embedding 维度应为 512"
 
     def test_hnsw_params_match_spec(self):
         """HNSW 索引参数应匹配 spec §5.3: M=16, efConstruction=200, IP。"""
@@ -159,7 +167,7 @@ class TestMilvusCollection:
         ]
         for field in required_fields:
             assert (
-                f'name="{field}"' in source or f"name='{field}'" in source
+                f'"name": "{field}"' in source or f"'name': '{field}'" in source
             ), f"缺少字段: {field}"
 
     def test_dry_run_executes(self):

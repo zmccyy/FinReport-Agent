@@ -5,26 +5,22 @@
 用法:
     python scripts/init_minio.py                          # 使用默认连接参数
     python scripts/init_minio.py --endpoint localhost:9000 # 指定端点
-    python scripts/init_minio.py --dry-run                 # 仅打印将要执行的操作
+    python scripts/init_minio.py --dry-run                 # 仅打印将要执行的操作（零依赖）
 
 依赖:
-    pip install minio
+    pip install minio  # 仅真实执行时需要；--dry-run 模式不依赖第三方包
 """
+
+from __future__ import annotations
 
 import argparse
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
-try:
-    from minio import Minio
-    from minio.commonconfig import ENABLED, Filter
-    from minio.lifecycleconfig import LifecycleConfig, Rule, Expiration
-    from minio.error import S3Error
-except ImportError:
-    print("请先安装 minio 客户端: pip install minio")
-    sys.exit(1)
+if TYPE_CHECKING:
+    from minio.lifecycleconfig import LifecycleConfig
 
 
 # ============================================================================
@@ -70,7 +66,25 @@ BUCKETS = {
 }
 
 
-def build_lifecycle_config(bucket_name: str, bucket_cfg: dict) -> LifecycleConfig | None:
+def _import_minio():
+    """惰性导入 minio 客户端，仅在真实执行路径调用。
+
+    dry-run 模式不触发此函数，因此不需要安装 minio 包。
+    """
+    try:
+        from minio import Minio
+        from minio.commonconfig import ENABLED, Filter
+        from minio.error import S3Error
+        from minio.lifecycleconfig import Expiration, LifecycleConfig, Rule
+    except ImportError:
+        print("请先安装 minio 客户端: pip install minio")
+        sys.exit(1)
+    return Minio, ENABLED, Filter, S3Error, LifecycleConfig, Rule, Expiration
+
+
+def build_lifecycle_config(
+    bucket_name: str, bucket_cfg: dict
+) -> LifecycleConfig | None:
     """为 bucket 构建生命周期规则。"""
     lifecycle = bucket_cfg.get("lifecycle")
     if lifecycle is None:
@@ -79,6 +93,9 @@ def build_lifecycle_config(bucket_name: str, bucket_cfg: dict) -> LifecycleConfi
     expiry_days = lifecycle.get("expiry_days")
     if expiry_days is None:
         return None
+
+    # 真实执行路径才需要 minio 类型
+    _, ENABLED, Filter, _, LifecycleConfig, Rule, Expiration = _import_minio()
 
     rule_id = f"expire-{bucket_name}-{expiry_days}d"
     return LifecycleConfig(
@@ -143,7 +160,9 @@ def init_buckets(
             action = "创建" if cfg["lifecycle"] else "创建（无生命周期）"
             print(f"  [{cfg['access']:>12}] {name}  ← {action}: {cfg['description']}")
             if cfg["lifecycle"]:
-                print(f"            └─ 生命周期: {cfg['lifecycle']['expiry_days']} 天后过期")
+                print(
+                    f"            └─ 生命周期: {cfg['lifecycle']['expiry_days']} 天后过期"
+                )
         print("\n连接信息:")
         print(f"  endpoint: {endpoint}")
         print(f"  access_key: {access_key}")
@@ -151,7 +170,9 @@ def init_buckets(
         print(f"  共 {len(BUCKETS)} 个 bucket 待创建")
         return results
 
-    # --- 连接 MinIO ---
+    # --- 连接 MinIO（真实执行路径才导入客户端） ---
+    Minio, _, _, S3Error, _, _, _ = _import_minio()
+
     print(f"连接 MinIO: {endpoint} (secure={secure})")
     try:
         client = Minio(
@@ -167,7 +188,9 @@ def init_buckets(
         sys.exit(1)
     except Exception as e:
         print(f"[ERROR] 无法连接到 MinIO ({endpoint}): {e}")
-        print("   请确认 MinIO 容器已启动: docker compose -f deploy/docker-compose.yml up -d minio")
+        print(
+            "   请确认 MinIO 容器已启动: docker compose -f deploy/docker-compose.yml up -d minio"
+        )
         sys.exit(1)
 
     print(f"[OK] 已连接到 MinIO (API: {endpoint})\n")
@@ -197,7 +220,7 @@ def init_buckets(
             if cfg["access"] == "public-read":
                 policy = build_public_read_policy(name)
                 client.set_bucket_policy(name, policy)
-                print(f"  └─ 访问策略: public-read (预签名 URL)")
+                print("  └─ 访问策略: public-read (预签名 URL)")
 
         except S3Error as e:
             print(f"[ERROR] [{name}] 操作失败: {e}")
@@ -209,7 +232,7 @@ def init_buckets(
     existed = sum(1 for v in results.values() if v == "exists")
     errors = sum(1 for v in results.values() if v == "error")
     print(f"结果: {created} 新建, {existed} 已存在, {errors} 失败")
-    print(f"验证: docker compose -f deploy/docker-compose.yml exec minio mc ls local")
+    print("验证: docker compose -f deploy/docker-compose.yml exec minio mc ls local")
     print(f"{'='*60}")
 
     if errors > 0:
