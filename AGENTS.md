@@ -15,7 +15,7 @@
 - 架构：5 层（L1 Vue3 / L2 SpringBoot / L3 FastAPI / L4 Models / L5 Data）
 - 关键约束：RTX 4050 Mobile 6GB VRAM，必须使用 4-bit 量化 + QLoRA
 - 总周期：12 周 / 6 里程碑 / 76 任务
-- 当前状态：M1、M2 已完成；M3.01 已完成，当前进行 M3.02–M3.10。实时进度以 docs/progress/ 和 docs/decisions/ 为准。
+- 当前状态：M1、M2、M3 已完成；M4 模型微调待启动。实时进度以 docs/progress/ 和 docs/decisions/ 为准。
 
 ---
 
@@ -603,5 +603,5 @@ A: 检查 EXTRACT 链路是否只用 1.5B、REASON 链路是否只用 7B；调�
 - 修改本文件需提 PR + review
 - 版本变更记录在文件头 版本 字段
 
-版本：v1.1
-最后更新：2026-07-22
+版本：v1.2
+最后更新：2026-07-24

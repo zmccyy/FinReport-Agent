@@ -1,7 +1,7 @@
 # FinReport Agent — Skills 使用策略
 
-> 版本：v1.0  
-> 最后更新：2026-07-22  
+> 版本：v1.1  
+> 最后更新：2026-07-24  
 > 适用范围：本仓库内的 Codex、Claude Code 及其他 AI 协作工具
 
 ## 1. 目的与边界
@@ -137,23 +137,23 @@ web-artifacts-builder
 - 修改应保持小步、可验证，并同步更新对应的 progress、API 或决策文档。
 - 不允许 skill 覆盖项目的版本锁定、分支策略、日志规范、错误处理和 Definition of Done。
 
-## 6. 当前仓库状态（2026-07-22）
+## 6. 当前仓库状态（2026-07-24）
 
 | 里程碑 | 当前状态 | 依据 |
 |---|---|---|
 | M1 | 基础设施与骨架已完成 | `docs/progress/m1.md` |
 | M2 | 解析与抽取闭环已完成 | `docs/progress/m2.md` |
-| M3 | 进行中，M3.01 已完成 | `docs/progress/m3.md`、`8506b38` |
+| M3 | 已完成（M3.01–M3.10 全部交付，SLA 端到端测试通过） | `docs/progress/m3.md`、`b4ddf24` |
 | M4 | 未开始 | `docs/progress/m4.md` |
 | M5 | 未开始 | `docs/progress/m5.md` |
 | M6 | 未开始 | `docs/progress/m6.md` |
 
-当前工作重点是 M3.02–M3.10：LLM 复核、异常检测、结果落库、报告生成、报告 PDF、前端页面和端到端 SLA。
+当前工作重点是 M4 模型微调：T1 抽取模型 QLoRA、T2 embedding LoRA、T3 LayoutLM 微调，以及配套的评估脚本与 model_registry 表维护。
 
 ## 7. 发现的文档/配置风险
 
-- 目标规范锁定 PyTorch 2.3.x，但 `ai-service/pyproject.toml` 当前声明为 `torch>=2.3,<2.6`；在 GPU 部署前需要单独提交版本收紧变更。
+- `ai-service/pyproject.toml` 已将 `torch` 收紧为 `~=2.3.0`（对齐 spec §1 锁定的 2.3.x）；GPU 部署前仍需在目标机器上验证 CUDA 12.1 wheel 可装、`bitsandbytes` 0.43+ 与 torch 2.3.x 兼容。
 - `transformers` 可以作为 ModelHub 的内部依赖，但业务代码边界必须继续由本文件和 `AGENTS.md` 约束。
-- `AGENTS.md`、`CLAUDE.md`、README 和实现计划的状态描述需要在里程碑变更时同步更新。
+- `AGENTS.md`、`CLAUDE.md`、README 和实现计划的状态描述已随里程碑变更同步至「M3 已完成、M4 待启动」；后续里程碑切换时需再次同步。
 
 

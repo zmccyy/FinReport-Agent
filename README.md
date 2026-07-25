@@ -1,6 +1,6 @@
 # FinReport Agent
 
-A 股上市公司财报深度解析 Agent。当前已完成 M1 基础设施与骨架、M2 解析与抽取闭环，并完成 M3.01 勾稽规则引擎；当前工作阶段为 M3.02–M3.10。
+A 股上市公司财报深度解析 Agent。当前已完成 M1 基础设施与骨架、M2 解析与抽取闭环、M3 勾稽异常与报告生成；下一阶段为 M4 模型微调。
 
 ## 前置条件
 
@@ -68,7 +68,7 @@ cd backend
 接口语义详见 `docs/api/openapi.yaml`，部署细节详见 `docs/deployment.md`。
 ## 当前开发状态与协作规范
 
-- 当前里程碑：M3 勾稽异常与报告生成（M3.01 已完成）。
+- 当前里程碑：M4 模型微调（M1/M2/M3 已完成）。
 - 进度明细：`docs/progress/m1.md` 至 `docs/progress/m6.md`。
 - AI 协作规范：`AGENTS.md`、`CLAUDE.md`。
 - Skills 保留、按需启用和冲突约束：`docs/skills.md`。

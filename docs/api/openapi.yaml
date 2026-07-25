@@ -1,9 +1,10 @@
 openapi: 3.0.3
 info:
-  title: FinReport Agent M1 API
-  version: 0.1.0
+  title: FinReport Agent API
+  version: 0.2.0
   description: |
-    M1.01–M1.12 的认证、上传、任务和 SSE 接口。错误响应遵循 RFC 9457。
+    M1.01–M1.12 认证/上传/任务/SSE 接口 + M2.11 三表查询 + M3.09 勾稽/异常/产物查询接口。
+    错误响应遵循 RFC 9457。所有非 /internal/* 端点需 Bearer JWT，由 JwtFilter 注入 X-User-Id 头。
 servers:
   - url: http://localhost:8080
 paths:
@@ -124,6 +125,108 @@ paths:
                 type: string
         '404':
           $ref: '#/components/responses/TaskNotFound'
+  /api/v1/reports/{reportId}:
+    get:
+      summary: 查询财报详情（M2.11）
+      description: |
+        返回报告头部信息：公司、报告期间、PDF 元数据、解析状态。
+        不存在或不属于当前用户的 report 统一返回 404，避免泄露资源存在性。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: 报告详情。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportDetailResponse'
+        '404':
+          $ref: '#/components/responses/ReportNotFound'
+  /api/v1/reports/{reportId}/statements:
+    get:
+      summary: 查询三表数据（M2.11）
+      description: |
+        一次性返回资产负债表 / 利润表 / 现金流量表的科目条目，前端按 Tab 切换渲染。
+        三张表 key 固定：balanceSheet / incomeStatement / cashFlow；空表返回空数组。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: 三表分组数据。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatementsResponse'
+        '404':
+          $ref: '#/components/responses/ReportNotFound'
+  /api/v1/reports/{reportId}/checks:
+    get:
+      summary: 查询勾稽核对结果（M3.09）
+      description: |
+        返回 accounting_check 表的规则列表，按 ruleType 升序。
+        每条含预期/实际/差额/通过标识/严重度/说明；note 字段可能含「[LLM 复核] ...」前缀。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: 勾稽结果列表（可能为空数组，表示 REPORT 阶段尚未完成）。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AccountingCheckResponse'
+        '404':
+          $ref: '#/components/responses/ReportNotFound'
+  /api/v1/reports/{reportId}/anomalies:
+    get:
+      summary: 查询异常检测结果（M3.09）
+      description: |
+        返回 anomaly 表的异常列表，按 anomalyType + itemName 升序。
+        anomalyType ∈ {yoy_change, qoq_change, logic_conflict}；severity ∈ {INFO, WARN, ERROR, CRITICAL}。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: 异常列表（可能为空数组）。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnomalyResponse'
+        '404':
+          $ref: '#/components/responses/ReportNotFound'
+  /api/v1/reports/{reportId}/artifacts:
+    get:
+      summary: 查询报告产物（M3.09）
+      description: |
+        返回 report_artifact 表的产物列表，按 artifactType 升序。
+        artifactType ∈ {PDF, MARKDOWN, CHART_PIE, CHART_LINE, CHART_BAR}；
+        status=GENERATED 附带 MinIO 预签名下载 URL（默认 7 天有效），status=FAILED 返回空 URL。
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/ReportId'
+      responses:
+        '200':
+          description: 产物列表（可能为空数组，表示 REPORT 阶段尚未完成）。
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ReportArtifactResponse'
+        '404':
+          $ref: '#/components/responses/ReportNotFound'
   /internal/live:
     get:
       summary: 后端 liveness
@@ -222,6 +325,14 @@ components:
       required: true
       schema:
         type: string
+    ReportId:
+      name: reportId
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 1
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -241,6 +352,17 @@ components:
             title: Not Found
             status: 404
             detail: 任务不存在
+    ReportNotFound:
+      description: 不存在或不属于当前用户的 report；统一为 REPORT_NOT_FOUND，避免泄露资源存在性。
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: https://finreport.example/errors/REPORT_NOT_FOUND
+            title: Not Found
+            status: 404
+            detail: 报告不存在
   schemas:
     UploadResponse:
       type: object
@@ -372,3 +494,181 @@ components:
           type: boolean
         status:
           type: object
+    ReportDetailResponse:
+      type: object
+      required: [id, taskId, companyCode, companyName, reportType, reportPeriod, parseStatus, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+          example: 1001
+        taskId:
+          type: string
+          description: 关联任务 ID，用于前端跳转进度页。
+        companyCode:
+          type: string
+          example: '600519'
+        companyName:
+          type: string
+          example: 贵州茅台
+        reportType:
+          type: string
+          enum: [ANNUAL, SEMI, Q1, Q3]
+        reportPeriod:
+          type: string
+          example: '2024-12-31'
+        pageCount:
+          type: integer
+          nullable: true
+          description: PDF 页数；解析前可能为 null。
+        parseStatus:
+          type: string
+          enum: [PENDING, RUNNING, COMPLETED, FAILED]
+        pdfObjectKey:
+          type: string
+          nullable: true
+          description: MinIO 对象 key，用于生成预签名下载 URL。
+        createdAt:
+          type: string
+          format: date-time
+    StatementsResponse:
+      type: object
+      required: [balanceSheet, incomeStatement, cashFlow]
+      properties:
+        balanceSheet:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatementItemResponse'
+        incomeStatement:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatementItemResponse'
+        cashFlow:
+          type: array
+          items:
+            $ref: '#/components/schemas/StatementItemResponse'
+    StatementItemResponse:
+      type: object
+      required: [id, statementType, itemName]
+      properties:
+        id:
+          type: integer
+          format: int64
+        statementType:
+          type: string
+          enum: [balance_sheet, income_statement, cash_flow]
+        itemName:
+          type: string
+          example: 货币资金
+        itemValue:
+          type: number
+          nullable: true
+          description: DECIMAL(20,4)，null 表示科目缺失。
+        currency:
+          type: string
+          example: CNY
+        unit:
+          type: string
+          example: 元
+        scope:
+          type: string
+          example: 合并
+        periodType:
+          type: string
+          description: 本期 / 上期 等。
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          nullable: true
+        sourcePage:
+          type: integer
+          nullable: true
+          description: 源 PDF 页码，用于回溯定位。
+    AccountingCheckResponse:
+      type: object
+      required: [id, ruleName, ruleType, isPass, severity, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        ruleName:
+          type: string
+          example: 资产负债表恒等式
+        ruleType:
+          type: string
+          enum: [balance_sheet_identity, net_income_to_retained, cash_flow_vs_net_income]
+        expected:
+          type: number
+          nullable: true
+        actual:
+          type: number
+          nullable: true
+        diff:
+          type: number
+          nullable: true
+          description: actual - expected。
+        isPass:
+          type: boolean
+        severity:
+          type: string
+          enum: [INFO, WARN, ERROR, CRITICAL]
+        note:
+          type: string
+          nullable: true
+          description: 可能含「[LLM 复核] ...」前缀的说明文本。
+        createdAt:
+          type: string
+          format: date-time
+    AnomalyResponse:
+      type: object
+      required: [id, itemName, anomalyType, severity, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        itemName:
+          type: string
+          example: 营业收入
+        anomalyType:
+          type: string
+          enum: [yoy_change, qoq_change, logic_conflict]
+        metricValue:
+          type: number
+          nullable: true
+        threshold:
+          type: number
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        severity:
+          type: string
+          enum: [INFO, WARN, ERROR, CRITICAL]
+        createdAt:
+          type: string
+          format: date-time
+    ReportArtifactResponse:
+      type: object
+      required: [id, artifactType, status, createdAt]
+      properties:
+        id:
+          type: integer
+          format: int64
+        artifactType:
+          type: string
+          enum: [PDF, MARKDOWN, CHART_PIE, CHART_LINE, CHART_BAR]
+        objectKey:
+          type: string
+          nullable: true
+          description: MinIO 对象 key；status=FAILED 时可能为 null。
+        status:
+          type: string
+          enum: [GENERATED, FAILED]
+        downloadUrl:
+          type: string
+          description: MinIO 预签名下载 URL；status=FAILED 时返回空字符串。
+          example: https://minio.example.com/finreport-reports/reports/1001/report.pdf?X-Amz-Signature=...
+        createdAt:
+          type: string
+          format: date-time
