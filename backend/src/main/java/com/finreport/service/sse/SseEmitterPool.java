@@ -69,7 +69,9 @@ public class SseEmitterPool {
     /**
      * 关闭某个任务的 sink（任务终态时调用）。
      *
-     * <p>已完成的 sink 保留在 map 中，以便断线重连的客户端接收历史终端事件后完成。</p>
+     * <p>完成后从 map 移除：断线重连的历史恢复由 Redis {@code RedisSseEventStore}
+     * 承担（spec §3.4「Redis 是恢复历史的唯一来源」），进程内保留已终结 sink
+     * 只会造成内存泄漏（每个 taskId 永久驻留 ConcurrentHashMap）。</p>
      *
      * @param taskId 任务 ID
      */
@@ -88,7 +90,9 @@ public class SseEmitterPool {
                 log.warn("[SseEmitterPool] tryEmitComplete 失败 taskId={} result={}", taskId, result);
             }
         }
-        log.debug("[SseEmitterPool] sink 已关闭（保留在 map 中） taskId={}", taskId);
+        // 仅当 map 中仍是本 sink 时移除，避免与并发 subscribe 的新 sink 竞争。
+        sinks.remove(taskId, taskSink);
+        log.debug("[SseEmitterPool] sink 已关闭并移除 taskId={}", taskId);
     }
 
     private TaskSink createTaskSink(String taskId) {

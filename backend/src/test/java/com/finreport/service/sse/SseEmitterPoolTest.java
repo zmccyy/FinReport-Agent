@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -132,14 +133,17 @@ class SseEmitterPoolTest {
         }
 
         @Test
-        @DisplayName("should keep completed sink in map for late subscribers")
-        void shouldKeepCompletedSink() {
+        @DisplayName("should remove completed sink so late subscribers get a fresh one")
+        void shouldRemoveCompletedSinkFromMap() {
             pool.subscribe("task-late");
             pool.complete("task-late");
 
-            // Late subscriber should get the completed sink → immediate complete
+            // M4 修复：complete() 后 sink 从 map 移除（防止内存泄漏）。
+            // 晚到订阅者拿到全新 sink，不再收到终态 complete 信号——
+            // 历史重放与终态事件由 RedisSseEventStore + TaskController 承担
+            // （spec §3.4「Redis 是恢复历史的唯一来源」）。
             StepVerifier.create(pool.subscribe("task-late"))
-                    .expectComplete()
+                    .expectTimeout(Duration.ofMillis(200))
                     .verify();
         }
 

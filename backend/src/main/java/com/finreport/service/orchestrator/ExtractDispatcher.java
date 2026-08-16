@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.reactive.TransactionalOperator;
 
 import com.finreport.domain.entity.Task;
 import com.finreport.domain.entity.TaskStep;
@@ -23,6 +24,7 @@ import com.finreport.trace.TraceContext;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * 三表抽取消息分发器 — spec §3.2.1 + plan M2.08。
@@ -59,16 +61,19 @@ public class ExtractDispatcher {
     private final TaskStepRepository stepRepo;
     private final TaskMessageProducer messageProducer;
     private final ExtractCompletionTracker tracker;
+    private final TransactionalOperator transactionalOperator;
 
     public ExtractDispatcher(
             TaskRepository taskRepo,
             TaskStepRepository stepRepo,
             TaskMessageProducer messageProducer,
-            ExtractCompletionTracker tracker) {
+            ExtractCompletionTracker tracker,
+            TransactionalOperator transactionalOperator) {
         this.taskRepo = taskRepo;
         this.stepRepo = stepRepo;
         this.messageProducer = messageProducer;
         this.tracker = tracker;
+        this.transactionalOperator = transactionalOperator;
     }
 
     /**
@@ -126,12 +131,15 @@ public class ExtractDispatcher {
                     stepRecord.setStatus(StepStatus.RUNNING.name());
                     stepRecord.setStartedAt(LocalDateTime.now());
                     return stepRepo.save(stepRecord)
-                            .then(Mono.deferContextual(context -> Mono.<Void>fromRunnable(() ->
-                                    messageProducer.publishTaskStep(
+                            .then(Mono.deferContextual(context -> Mono
+                                    .<Void>fromRunnable(() -> messageProducer.publishTaskStep(
                                             task.getId(),
                                             step.getRoutingKey(),
                                             payload,
-                                            context.getOrDefault(TraceContext.TRACE_ID, "")))))
+                                            context.getOrDefault(TraceContext.TRACE_ID, "")))
+                                    // convertAndSend 是阻塞 IO，禁止占用
+                                    // Reactor 事件循环线程（spec §12.2）。
+                                    .subscribeOn(Schedulers.boundedElastic())))
                             .onErrorResume(IntegrationException.class,
                                     error -> markDispatchFailed(task, stepRecord, error)
                                             .then(Mono.<Void>error(error)));
@@ -140,6 +148,9 @@ public class ExtractDispatcher {
 
     /**
      * 补偿 MQ 发布失败：任务和当前步骤均明确转为 FAILED，随后将原集成异常传给调用方。
+     *
+     * <p>task 与 step 两步落库包裹在同一事务内：第二步失败时第一步一并回滚，
+     * 避免 step=FAILED 而 task=RUNNING 的状态不一致。</p>
      */
     private Mono<Void> markDispatchFailed(Task task, TaskStep stepRecord, IntegrationException error) {
         String message = "MQ 发布失败: " + error.getMessage();
@@ -151,6 +162,7 @@ public class ExtractDispatcher {
         stepRecord.setStatus(StepStatus.FAILED.name());
         stepRecord.setErrorMsg(message);
         stepRecord.setFinishedAt(LocalDateTime.now());
-        return stepRepo.save(stepRecord).then(taskRepo.save(task)).then();
+        return transactionalOperator.transactional(
+                stepRepo.save(stepRecord).then(taskRepo.save(task))).then();
     }
 }

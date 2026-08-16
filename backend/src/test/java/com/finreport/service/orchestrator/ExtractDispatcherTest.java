@@ -32,6 +32,9 @@ import com.finreport.repository.TaskRepository;
 import com.finreport.repository.TaskStepRepository;
 import com.finreport.trace.TraceContext;
 
+import org.mockito.ArgumentMatchers;
+import org.springframework.transaction.reactive.TransactionalOperator;
+
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -63,11 +66,20 @@ class ExtractDispatcherTest {
     @Mock
     private ExtractCompletionTracker tracker;
 
+    @Mock
+    private TransactionalOperator transactionalOperator;
+
     private ExtractDispatcher dispatcher;
 
     @BeforeEach
     void setUp() {
-        dispatcher = new ExtractDispatcher(taskRepo, stepRepo, messageProducer, tracker);
+        dispatcher = new ExtractDispatcher(taskRepo, stepRepo, messageProducer, tracker,
+                transactionalOperator);
+        // markDispatchFailed 的事务包裹：透传原 Mono（与 TaskOrchestratorTest 同一模式）。
+        // lenient：仅补偿路径走到此 stub，其余用例不触发。
+        org.mockito.Mockito.lenient().doAnswer(invocation -> invocation.getArgument(0))
+                .when(transactionalOperator)
+                .transactional(ArgumentMatchers.<Mono<Object>>any());
     }
 
     private Task task(String id) {

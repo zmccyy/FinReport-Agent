@@ -238,6 +238,8 @@ class TaskOrchestratorTest {
         @Test
         @DisplayName("should mark task and step failed when MQ publishing fails")
         void shouldMarkTaskAndStepFailedWhenMqPublishingFails() {
+            // markDispatchFailed 的事务包裹依赖 TransactionalOperator（M4 修复）。
+            stubTransactionalOperator();
             Task task = Task.builder()
                     .id("task-mq-failure")
                     .userId(5L)
