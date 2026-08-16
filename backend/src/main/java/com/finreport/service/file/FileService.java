@@ -366,12 +366,9 @@ public class FileService {
     }
 
     private Mono<Report> findReportForUserAndMd5(Long userId, String md5) {
-        Mono<Report> scoped = reportRepo.findByUserIdAndPdfMd5(userId, md5);
-        if (scoped != null) {
-            return scoped;
-        }
-        Mono<Report> legacy = reportRepo.findByPdfMd5(md5);
-        return legacy == null ? Mono.empty() : legacy.filter(report -> userId.equals(report.getUserId()));
+        // R2DBC 返回的 Mono 永不为 null（未命中为 empty Mono）；
+        // report 表自始带 userId，无需按 md5 全局回退。
+        return reportRepo.findByUserIdAndPdfMd5(userId, md5);
     }
 
     private Mono<Report> createReport(

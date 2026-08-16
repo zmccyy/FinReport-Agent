@@ -65,9 +65,9 @@ public class StatementQueryService {
     /**
      * 查询某份报告的三表数据（含归属校验）。
      *
-     * <p>三表分别按 {@code statement_type} 过滤后组装为 {@link StatementsResponse}；
-     * 三张表内按 {@code item_name} 字典序排序（{@code FinancialStatementRepository}
-     * 的 derived query 已保证）。</p>
+     * <p>单次批量查询 {@code report_id} 下全部科目（按 statement_type + item_name
+     * 排序），内存中按 {@code statement_type} 分组后组装为 {@link StatementsResponse}，
+     * 避免三表三次顺序往返（spec §12.2 禁止循环查库）。</p>
      *
      * @param reportId 报告 ID
      * @param userId   当前用户 ID
@@ -80,16 +80,18 @@ public class StatementQueryService {
                 .switchIfEmpty(Mono.error(new BusinessException(
                         HttpStatus.NOT_FOUND, "REPORT_NOT_FOUND",
                         "报告不存在: " + reportId)))
-                .flatMap(report -> fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(reportId, TYPE_BALANCE_SHEET)
+                .flatMap(report -> fsRepo.findByReportIdOrderByStatementTypeAscItemNameAsc(reportId)
                         .collectList()
-                        .flatMap(bs -> fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(reportId, TYPE_INCOME_STATEMENT)
-                                .collectList()
-                                .flatMap(is -> fsRepo.findByReportIdAndStatementTypeOrderByItemNameAsc(reportId, TYPE_CASH_FLOW)
-                                        .collectList()
-                                        .map(cf -> new StatementsResponse(
-                                                toResponses(bs),
-                                                toResponses(is),
-                                                toResponses(cf))))));
+                        .map(items -> new StatementsResponse(
+                                toResponses(items.stream()
+                                        .filter(i -> TYPE_BALANCE_SHEET.equals(i.getStatementType()))
+                                        .toList()),
+                                toResponses(items.stream()
+                                        .filter(i -> TYPE_INCOME_STATEMENT.equals(i.getStatementType()))
+                                        .toList()),
+                                toResponses(items.stream()
+                                        .filter(i -> TYPE_CASH_FLOW.equals(i.getStatementType()))
+                                        .toList()))));
     }
 
     private static ReportDetailResponse toDetailResponse(Report report) {

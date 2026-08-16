@@ -1,6 +1,7 @@
 package com.finreport.mq;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -190,8 +191,8 @@ class ProgressConsumerTest {
         }
 
         @Test
-        @DisplayName("should nack when durable SSE persistence returns no event")
-        void shouldNackWhenDurableSsePersistenceReturnsEmpty() throws Exception {
+        @DisplayName("should ack and skip broadcast when persistence returns no event (dedup hit)")
+        void shouldAckWhenDurableSsePersistenceReturnsEmpty() throws Exception {
             consumer = new ProgressConsumer(ssePool, orchestrator, eventStore);
             String json = objectMapper.writeValueAsString(Map.of(
                     "taskId", "task-empty-event", "step", "PARSE", "status", "RUNNING",
@@ -202,12 +203,14 @@ class ProgressConsumerTest {
             task.setStatus(TaskStatus.PARSE_RUNNING.name());
             when(orchestrator.handleStepProgress(anyString(), anyString(), anyString(), any()))
                     .thenReturn(Mono.just(task));
+            // append 返回 empty = dedup 命中（事件已持久化过，MQ 重投场景）：
+            // 跳过本地广播并正常 ack，不 nack 进 DLQ（M4 修复）。
             when(eventStore.append(eq("task-empty-event"), any())).thenReturn(Mono.empty());
 
             consumer.onProgress(message, channel, 7L);
 
-            verify(channel).basicNack(7L, false, false);
-            verify(channel, never()).basicAck(7L, false);
+            verify(channel).basicAck(7L, false);
+            verify(channel, never()).basicNack(anyLong(), anyBoolean(), anyBoolean());
             verify(ssePool, never()).emit(anyString(), any());
         }
 

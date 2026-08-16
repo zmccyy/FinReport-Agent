@@ -161,8 +161,8 @@ class FileServiceTest {
 
             // MinIO: bucket exists
             when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(true);
-            // Report: no MD5 duplicate
-            when(reportRepo.findByPdfMd5(anyString())).thenReturn(Mono.empty());
+            // Report: no MD5 duplicate（按 userId 范围查重，M4 移除全局 md5 回退）
+            when(reportRepo.findByUserIdAndPdfMd5(eq(1L), anyString())).thenReturn(Mono.empty());
 
             // Orchestrator: create task (without dispatch)
             Task task = Task.builder()
@@ -285,7 +285,7 @@ class FileServiceTest {
             FilePart filePart = mockFilePart("report.pdf", MediaType.APPLICATION_PDF, SAMPLE_PDF);
 
             when(minioClient.bucketExists(any(BucketExistsArgs.class))).thenReturn(true);
-            when(reportRepo.findByPdfMd5(anyString())).thenReturn(Mono.empty());
+            when(reportRepo.findByUserIdAndPdfMd5(eq(1L), anyString())).thenReturn(Mono.empty());
 
             Task task = Task.builder()
                     .id("task-no-idem").userId(1L)

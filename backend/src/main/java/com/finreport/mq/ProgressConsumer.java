@@ -253,7 +253,11 @@ public class ProgressConsumer {
         ServerSentEvent<String> persisted = eventStore.append(taskId, event)
                 .block(ORCHESTRATOR_TIMEOUT);
         if (persisted == null) {
-            throw new IllegalStateException("SSE progress event was not persisted: " + taskId);
+            // dedup 命中：该事件此前已持久化并广播过（MQ 重投场景）。
+            // 跳过本地广播并正常返回，让消费链路 ack，而不是误判为持久化
+            // 失败而 nack 进 DLQ。
+            log.debug("[ProgressConsumer] 重复进度事件，跳过广播 taskId={}", taskId);
+            return;
         }
         try {
             if (!ssePool.emit(taskId, persisted)) {
