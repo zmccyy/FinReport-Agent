@@ -35,6 +35,14 @@ class GenerateRequest(BaseModel):
     max_new_tokens: int = Field(default=512, ge=1, le=4096)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
     timeout_seconds: float | None = Field(default=None, ge=1.0, le=600.0)
+    system_prompt: str | None = Field(
+        default=None,
+        description="Optional system message (API backends, M4.02)",
+    )
+    json_mode: bool = Field(
+        default=False,
+        description="Request JSON-constrained output (API backends, M4.02)",
+    )
 
 
 class GenerateResponse(BaseModel):

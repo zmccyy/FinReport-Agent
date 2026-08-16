@@ -1,14 +1,13 @@
-"""M2.04 ModelHub: scene-routed model loading and inference entrypoint.
+"""ModelHub: scene-routed inference entrypoint (M2.04 + M4.02 API 化改造).
 
-Spec §3.5 routes inference by scene:
-- ``EXTRACT``  → Qwen2.5-1.5B QLoRA  (本地, 4-bit)  — M2.06+ (T1 adapter)
-- ``REASON``   → Qwen2.5-7B-Instruct (本地, 4-bit GPTQ)
-- ``EMBED``    → bge-small-zh LoRA    (本地)         — M5+
-- ``LAYOUT``   → LayoutLMv3           (本地)         — M4+
+Spec §3.5 routes inference by scene（2026-08-16 变更，本地训练取消）：
+- ``EXTRACT``  → DeepSeek API deepseek-chat（json_mode）
+- ``REASON``   → DeepSeek API deepseek-chat
+- ``EMBED``    → bge-small-zh-v1.5（本地 CPU，512 维）— M4.07 实装
 
-M2.04 only needs the 7B REASON path. Other scenes return their configured
-model_key/quant pair but ``load_llm`` only supports the 7B and 1.5B LLM keys
-in this iteration; embed/layout will be wired in their respective milestones.
+M4.02 起 ModelHub 默认后端为 ``DeepSeekBackend``（无需显式 load，
+generate() 自动完成轻量初始化）。本地 TransformersBackend 仍可注入
+（遗留测试兼容），M4.08 将随 GPU 栈一并移除。
 """
 
 from __future__ import annotations
@@ -19,9 +18,8 @@ from typing import Any
 
 from app.core.config import Settings
 from app.core.exceptions import AiException, ModelLoadException
+from app.modules.modelhub.api_backend import QUANT_API, DeepSeekBackend
 from app.modules.modelhub.llm_loader import (
-    QUANT_GPTQ_INT4,
-    QUANT_NF4,
     GenerateResult,
     LlmBackend,
     LlmLoader,
@@ -37,19 +35,17 @@ class Scene(str, Enum):
     EXTRACT = "extract"
     REASON = "reason"
     EMBED = "embed"
-    LAYOUT = "layout"
 
 
-# Logical model key + quant label per scene.
+# Logical model key + quant label per scene (2026-08-16 API 化).
 SCENE_MODEL_MAP: dict[Scene, tuple[str, str]] = {
-    Scene.EXTRACT: ("1.5b", QUANT_NF4),
-    Scene.REASON: ("7b", QUANT_GPTQ_INT4),
-    Scene.EMBED: ("bge", "lora"),
-    Scene.LAYOUT: ("layoutlm", "fp16"),
+    Scene.EXTRACT: ("deepseek-chat", QUANT_API),
+    Scene.REASON: ("deepseek-chat", QUANT_API),
+    Scene.EMBED: ("bge", "cpu"),
 }
 
-# LLM scenes (routed through LlmLoader). EMBED/LAYOUT use their own engines
-# in later milestones and are not loadable as LLMs here.
+# LLM scenes (routed through the API backend). EMBED uses its own engine
+# (M4.07) and is not loadable as an LLM here.
 LLM_SCENES: frozenset[Scene] = frozenset({Scene.EXTRACT, Scene.REASON})
 
 
@@ -60,28 +56,37 @@ class ModelHub:
         self,
         settings: Settings | None = None,
         llm_loader: LlmLoader | None = None,
+        llm_backend: LlmBackend | None = None,
     ) -> None:
         """Configure the ModelHub.
 
         Args:
-            settings: Application settings (model paths + SLA knobs).
-            llm_loader: Optional LlmLoader override for tests.
+            settings: Application settings (API config + SLA knobs).
+            llm_loader: Optional LlmLoader override for tests (defaults to
+                a loader wrapping the DeepSeek API backend).
+            llm_backend: Optional backend used to build the default loader
+                (ignored when ``llm_loader`` is provided).
         """
         self.settings = settings or Settings()
-        self.llm_loader = llm_loader or LlmLoader(self.settings)
+        if llm_loader is None:
+            backend = llm_backend or DeepSeekBackend(self.settings)
+            llm_loader = LlmLoader(self.settings, backend=backend)
+        self.llm_loader = llm_loader
 
     def load_llm(self, name: str, quant: str) -> None:
         """Load an LLM by logical name and quantization.
 
         Args:
-            name: Logical model key (``"7b"`` / ``"1.5b"``).
-            quant: Quantization label (``"gptq-int4"`` / ``"nf4"``).
+            name: Logical model key (``"deepseek-chat"`` / legacy ``"7b"``).
+            quant: Quantization label (``"api"`` / ``"gptq-int4"`` / ``"nf4"``).
 
         Raises:
             ModelLoadException: When ``name`` is unknown or the backend fails
                 to load.
         """
-        path = self._resolve_model_path(name)
+        # API 路由无本地产物，跳过路径解析——避免模型名与
+        # settings.llm_api_model 耦合（配置改名后仍可加载）。
+        path = "" if quant == QUANT_API else self._resolve_model_path(name)
         LOGGER.info(
             "[ModelHub.load_llm] name=%s quant=%s path=%s",
             name,
@@ -97,44 +102,58 @@ class ModelHub:
         max_new_tokens: int | None = None,
         temperature: float = 0.0,
         timeout_seconds: float | None = None,
+        system_prompt: str | None = None,
+        json_mode: bool = False,
     ) -> GenerateResult:
-        """Generate a completion on the resident LLM.
+        """Generate a completion (DeepSeek API by default, M4.02).
+
+        The default API backend needs no explicit ``load_llm()`` — the call
+        auto-initializes the HTTP client on first use.
 
         Args:
             prompt: Input prompt.
             max_new_tokens: Override default max tokens.
             temperature: Sampling temperature; 0 means greedy.
             timeout_seconds: Override SLA timeout.
+            system_prompt: Optional system message (API backends).
+            json_mode: Request JSON-constrained output (API backends).
 
         Returns:
             A GenerateResult.
 
         Raises:
-            AiException: When no LLM is loaded.
-            InferenceTimeoutException: On timeout.
+            AiException: On 4xx API errors or retries exhausted.
+            InferenceTimeoutException: On API timeout.
+            ModelLoadException: When the API key is not configured.
         """
+        if not self.llm_loader.is_loaded():
+            # API 模式：默认后端无需显式加载，首次调用自动初始化。
+            self.load_llm(self.settings.llm_api_model, QUANT_API)
         return self.llm_loader.generate(
             prompt,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             timeout_seconds=timeout_seconds,
+            system_prompt=system_prompt,
+            json_mode=json_mode,
         )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed a batch of texts (stub — wired in M5 with bge-small-zh LoRA).
+        """Embed a batch of texts (stub — wired in M4.07 with bge-small-zh-v1.5).
 
         Args:
             texts: Texts to embed.
 
         Returns:
-            One float vector per input text.
+            One float vector per input text (512-dim, normalized).
 
         Raises:
-            AiException: Always in M2.04 — embedder lands in M5.
+            AiException: Always until M4.07 lands.
         """
         del texts
         raise AiException(
-            "ModelHub.embed() is not implemented in M2.04; bge-small-zh LoRA embedder lands in M5"
+            "ModelHub.embed() is not implemented yet; "
+            "bge-small-zh-v1.5 embedder lands in M4.07"
         )
 
     def route(self, scene: Scene) -> tuple[str, str]:
@@ -159,12 +178,12 @@ class ModelHub:
 
         Raises:
             AiException: When the scene does not route through the LLM loader
-                (EMBED/LAYOUT will be wired in their own milestones).
+                (EMBED wires its own engine in M4.07).
             ModelLoadException: When the backend fails to load.
         """
         if scene not in LLM_SCENES:
             raise AiException(
-                f"Scene {scene.value} does not route through LlmLoader in M2.04"
+                f"Scene {scene.value} does not route through the LLM backend"
             )
         model_key, quant = self.route(scene)
         self.load_llm(model_key, quant)
@@ -192,8 +211,11 @@ class ModelHub:
     def _resolve_model_path(self, name: str) -> str:
         """Resolve a logical model key to a filesystem path.
 
+        API-routed models never reach this method (``load_llm`` short-circuits
+        on ``quant == "api"``).
+
         Args:
-            name: Logical model key (``"7b"`` / ``"1.5b"`` / ``"bge"`` / ``"layoutlm"``).
+            name: Logical model key (legacy local keys; M4.08 移除).
 
         Returns:
             Absolute or relative path to the model directory.
@@ -201,16 +223,16 @@ class ModelHub:
         Raises:
             ModelLoadException: When the key is unknown.
         """
-        mapping = {
+        mapping: dict[str, str] = {
+            # 遗留本地键（M4.08 移除）。
             "7b": self.settings.model_7b_path,
             "1.5b": self.settings.model_15b_path,
             "bge": self.settings.model_embed_path,
-            "layoutlm": "models/layoutlmv3-base",
         }
         if name not in mapping:
             raise ModelLoadException(f"Unknown model name: {name}")
         path = mapping[name]
-        return str(Path(path).expanduser())
+        return str(Path(path).expanduser()) if path else ""
 
 
 _DEFAULT_HUB: ModelHub | None = None

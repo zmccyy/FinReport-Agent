@@ -16,6 +16,7 @@ from app.core.exceptions import (
 )
 from app.main import create_app
 from app.modules.modelhub import (
+    QUANT_API,
     QUANT_GPTQ_INT4,
     QUANT_NF4,
     ModelHub,
@@ -75,6 +76,8 @@ class _FakeBackend:
         max_new_tokens: int,
         temperature: float,
         timeout_seconds: float,
+        system_prompt: str | None = None,
+        json_mode: bool = False,
     ) -> GenerateResult:
         """Record the call; raise generate_error or sleep, then return result."""
         import time
@@ -85,6 +88,8 @@ class _FakeBackend:
                 "max_new_tokens": max_new_tokens,
                 "temperature": temperature,
                 "timeout_seconds": timeout_seconds,
+                "system_prompt": system_prompt,
+                "json_mode": json_mode,
             }
         )
         if self.generate_error is not None:
@@ -280,10 +285,10 @@ def test_modelhub_generate_delegates_to_loader() -> None:
 
 
 def test_modelhub_embed_not_yet_implemented() -> None:
-    """embed() raises AiException in M2.04 (wired in M5)."""
+    """embed() raises AiException until M4.07 wires bge-small-zh-v1.5."""
     hub = ModelHub(llm_loader=LlmLoader(backend=_FakeBackend()))
 
-    with pytest.raises(AiException, match="M5"):
+    with pytest.raises(AiException, match="M4.07"):
         hub.embed(["hello"])
 
 
@@ -291,31 +296,28 @@ def test_modelhub_route_returns_scene_model_pair() -> None:
     """route() returns the (model_key, quant) tuple for each scene."""
     hub = ModelHub(llm_loader=LlmLoader(backend=_FakeBackend()))
 
-    assert hub.route(Scene.REASON) == ("7b", QUANT_GPTQ_INT4)
-    assert hub.route(Scene.EXTRACT) == ("1.5b", QUANT_NF4)
-    assert hub.route(Scene.EMBED) == ("bge", "lora")
-    assert hub.route(Scene.LAYOUT) == ("layoutlm", "fp16")
+    assert hub.route(Scene.REASON) == ("deepseek-chat", QUANT_API)
+    assert hub.route(Scene.EXTRACT) == ("deepseek-chat", QUANT_API)
+    assert hub.route(Scene.EMBED) == ("bge", "cpu")
 
 
 def test_modelhub_load_for_scene_loads_llm() -> None:
-    """load_for_scene() loads the 7B for the REASON scene."""
+    """load_for_scene() loads the API model for the REASON scene."""
     backend = _FakeBackend()
     hub = ModelHub(llm_loader=LlmLoader(backend=backend))
 
     hub.load_for_scene(Scene.REASON)
 
-    assert hub.llm_loader.loaded_model() == "7b"
-    assert backend.load_calls[0][1] == QUANT_GPTQ_INT4
+    assert hub.llm_loader.loaded_model() == "deepseek-chat"
+    assert backend.load_calls[0][1] == QUANT_API
 
 
 def test_modelhub_load_for_scene_rejects_non_llm_scene() -> None:
-    """load_for_scene() raises for EMBED/LAYOUT in M2.04."""
+    """load_for_scene() raises for EMBED (wired in M4.07)."""
     hub = ModelHub(llm_loader=LlmLoader(backend=_FakeBackend()))
 
     with pytest.raises(AiException, match="does not route"):
         hub.load_for_scene(Scene.EMBED)
-    with pytest.raises(AiException, match="does not route"):
-        hub.load_for_scene(Scene.LAYOUT)
 
 
 def test_modelhub_unload_forwards_to_loader() -> None:
@@ -338,11 +340,11 @@ def test_modelhub_status_returns_snapshot() -> None:
     status = hub.status()
     assert status["loaded_llm"] is None
     assert status["is_loaded"] is False
-    assert status["scenes"]["reason"] == {"model": "7b", "quant": QUANT_GPTQ_INT4}
+    assert status["scenes"]["reason"] == {"model": "deepseek-chat", "quant": QUANT_API}
 
-    hub.load_llm("7b", QUANT_GPTQ_INT4)
+    hub.load_llm("deepseek-chat", QUANT_API)
     status = hub.status()
-    assert status["loaded_llm"] == "7b"
+    assert status["loaded_llm"] == "deepseek-chat"
     assert status["is_loaded"] is True
 
 
@@ -636,8 +638,8 @@ def test_internal_models_status_endpoint_reports_loaded() -> None:
     body = response.json()
     assert body["loaded_llm"] == "7b"
     assert body["is_loaded"] is True
-    assert body["scenes"]["reason"]["quant"] == "gptq-int4"
-    assert body["scenes"]["extract"]["model"] == "1.5b"
+    assert body["scenes"]["reason"]["quant"] == QUANT_API
+    assert body["scenes"]["extract"]["model"] == "deepseek-chat"
 
 
 def test_internal_models_generate_endpoint() -> None:

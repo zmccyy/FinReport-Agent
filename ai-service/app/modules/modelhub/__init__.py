@@ -1,5 +1,6 @@
 """M11 ModelHub package: model loading + inference routing."""
 
+from app.modules.modelhub.api_backend import QUANT_API, DeepSeekBackend
 from app.modules.modelhub.llm_loader import (
     QUANT_GPTQ_INT4,
     QUANT_NF4,
@@ -27,9 +28,11 @@ __all__ = [
     "LLM_SCENES",
     "MODEL_LOCK_KEY_PREFIX",
     "MODEL_LOCK_TTL_SECONDS_DEFAULT",
+    "QUANT_API",
     "QUANT_GPTQ_INT4",
     "QUANT_NF4",
     "SCENE_MODEL_MAP",
+    "DeepSeekBackend",
     "GenerateResult",
     "LlmBackend",
     "LlmLoader",

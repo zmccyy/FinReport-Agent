@@ -44,7 +44,8 @@ def test_ai_service_ci_runs_quality_tests_and_service_dry_run() -> None:
         "ruff check app/ tests/",
         "black --check app/ tests/",
         "pytest tests/ -v --cov=app --cov-fail-under=80",
-        ".[prod,dev]",
+        # 轻量安装：dev extras + init 脚本测试所需轻量客户端（无 GPU 重依赖）。
+        '.[dev]" minio pymilvus',
         "/internal/health",
     ):
         assert expected in workflow

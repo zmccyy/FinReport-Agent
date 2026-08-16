@@ -99,6 +99,8 @@ async def generate(
         max_new_tokens=request.max_new_tokens,
         temperature=request.temperature,
         timeout_seconds=request.timeout_seconds,
+        system_prompt=request.system_prompt,
+        json_mode=request.json_mode,
     )
     return GenerateResponse(
         text=result.text,

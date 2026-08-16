@@ -37,3 +37,9 @@ class Settings(BaseSettings):
     model_lock_ttl_seconds: int = 300
     model_lock_retry_seconds: float = 2.0
     vram_idle_threshold_seconds: int = 600
+    # M4.02 DeepSeek API (OpenAI 兼容协议, 2026-08-16 起本地训练取消).
+    llm_api_base_url: str = "https://api.deepseek.com"
+    llm_api_key: str = ""
+    llm_api_model: str = "deepseek-chat"
+    llm_api_max_retries: int = 2
+    llm_api_retry_base_delay_seconds: float = 1.0

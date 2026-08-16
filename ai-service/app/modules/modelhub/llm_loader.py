@@ -88,6 +88,8 @@ class LlmBackend(Protocol):
         max_new_tokens: int,
         temperature: float,
         timeout_seconds: float,
+        system_prompt: str | None = None,
+        json_mode: bool = False,
     ) -> GenerateResult:
         """Run a single generate call against the loaded model.
 
@@ -96,6 +98,8 @@ class LlmBackend(Protocol):
             max_new_tokens: Maximum tokens to generate.
             temperature: Sampling temperature (0 = greedy).
             timeout_seconds: Inference SLA timeout.
+            system_prompt: Optional system message (API backends).
+            json_mode: Request JSON-constrained output (API backends).
 
         Returns:
             A GenerateResult carrying the decoded text and timings.
@@ -202,6 +206,8 @@ class TransformersBackend:
         max_new_tokens: int,
         temperature: float,
         timeout_seconds: float,
+        system_prompt: str | None = None,
+        json_mode: bool = False,
     ) -> GenerateResult:
         """Generate a completion for ``prompt``.
 
@@ -210,6 +216,9 @@ class TransformersBackend:
             max_new_tokens: Cap on newly generated tokens.
             temperature: Sampling temperature; 0 means greedy.
             timeout_seconds: SLA timeout. Exceeding raises InferenceTimeoutException.
+            system_prompt: Prepended to the prompt (local backend ignores
+                role separation; the API backend sends a real system message).
+            json_mode: Ignored by the local backend (API-only).
 
         Returns:
             A GenerateResult with text and timings.
@@ -221,6 +230,9 @@ class TransformersBackend:
         if self._model is None or self._tokenizer is None:
             raise AiException("LLM backend has no loaded model")
         torch = _lazy_import_torch()
+        del json_mode  # 本地后端不支持 json_mode，仅 API 后端生效（M4.02）
+        if system_prompt:
+            prompt = f"{system_prompt}\n\n{prompt}"
         tokenizer = self._tokenizer
         model = self._model
 
@@ -430,6 +442,8 @@ class LlmLoader:
         max_new_tokens: int | None = None,
         temperature: float = 0.0,
         timeout_seconds: float | None = None,
+        system_prompt: str | None = None,
+        json_mode: bool = False,
     ) -> GenerateResult:
         """Generate a completion for ``prompt`` on the resident model.
 
@@ -438,6 +452,8 @@ class LlmLoader:
             max_new_tokens: Override default max tokens.
             temperature: Sampling temperature; 0 means greedy.
             timeout_seconds: Override SLA timeout.
+            system_prompt: Optional system message (API backends).
+            json_mode: Request JSON-constrained output (API backends).
 
         Returns:
             A GenerateResult from the backend.
@@ -454,6 +470,8 @@ class LlmLoader:
             temperature=temperature,
             timeout_seconds=timeout_seconds
             or float(self.settings.model_generate_timeout_seconds),
+            system_prompt=system_prompt,
+            json_mode=json_mode,
         )
 
     def unload(self) -> None:

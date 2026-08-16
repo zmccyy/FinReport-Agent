@@ -156,6 +156,8 @@ class _FakeBackend:
         max_new_tokens: int,
         temperature: float,
         timeout_seconds: float,
+        system_prompt: str | None = None,
+        json_mode: bool = False,
     ) -> Any:
         raise NotImplementedError
 
@@ -427,8 +429,8 @@ def test_scheduler_load_for_scene_with_lock_acquires_then_loads() -> None:
     lock = sched.load_for_scene_with_lock(Scene.REASON)
 
     assert lock.is_acquired is True
-    assert hub.llm_loader.loaded_model() == "7b"
-    assert backend.load_calls[0][1] == "gptq-int4"
+    assert hub.llm_loader.loaded_model() == "deepseek-chat"
+    assert backend.load_calls[0][1] == "api"
     # Lock not auto-released — caller owns it now.
     lock.release()
 
@@ -436,8 +438,8 @@ def test_scheduler_load_for_scene_with_lock_acquires_then_loads() -> None:
 def test_scheduler_load_for_scene_with_lock_raises_busy_when_lock_held() -> None:
     """Scheduler raises ModelLockBusyException when another worker holds the lock."""
     fake = _FakeRedis()
-    # Pre-acquire the 7b lock as if another worker held it.
-    ModelLock("7b", fake, worker_id="other", ttl_seconds=60).acquire()
+    # Pre-acquire the API model lock as if another worker held it.
+    ModelLock("deepseek-chat", fake, worker_id="other", ttl_seconds=60).acquire()
 
     backend = _FakeBackend()
     hub = _hub(backend)
@@ -462,20 +464,18 @@ def test_scheduler_load_releases_lock_when_load_fails() -> None:
         sched.load_for_scene_with_lock(Scene.REASON)
 
     # Lock was released back to the pool.
-    assert fake.get(f"{MODEL_LOCK_KEY_PREFIX}7b") is None
+    assert fake.get(f"{MODEL_LOCK_KEY_PREFIX}deepseek-chat") is None
     assert hub.llm_loader.loaded_model() is None
 
 
 def test_scheduler_load_rejects_non_llm_scene() -> None:
-    """EMBED / LAYOUT scenes are not loadable through the LLM scheduler."""
+    """EMBED scene is not loadable through the LLM scheduler."""
     fake = _FakeRedis()
     hub = _hub()
     sched = VramScheduler(hub, redis_client=fake)
 
     with pytest.raises(ModelLockBusyException, match="does not route"):
         sched.load_for_scene_with_lock(Scene.EMBED)
-    with pytest.raises(ModelLockBusyException, match="does not route"):
-        sched.load_for_scene_with_lock(Scene.LAYOUT)
 
 
 def test_scheduler_touch_updates_last_used() -> None:
@@ -505,11 +505,11 @@ def test_scheduler_evict_idle_unloads_idle_model() -> None:
     sched.load_for_scene_with_lock(Scene.REASON).release()
 
     # Move last_used into the past beyond threshold=0.
-    sched._last_used["7b"] = time.monotonic() - 10
+    sched._last_used["deepseek-chat"] = time.monotonic() - 10
 
     unloaded = sched.evict_idle()
 
-    assert unloaded == ["7b"]
+    assert unloaded == ["deepseek-chat"]
     assert backend.unload_calls == 1
     assert hub.llm_loader.loaded_model() is None
 
@@ -568,7 +568,7 @@ def test_scheduler_uses_redis_client_wrapper() -> None:
 
     lock = sched.load_for_scene_with_lock(Scene.REASON)
     assert lock.is_acquired is True
-    assert fake.get(f"{MODEL_LOCK_KEY_PREFIX}7b") is not None
+    assert fake.get(f"{MODEL_LOCK_KEY_PREFIX}deepseek-chat") is not None
     lock.release()
 
 
@@ -588,8 +588,8 @@ def test_scheduler_loads_same_model_after_lock_release() -> None:
     lock2.release()
 
 
-def test_scheduler_loads_different_model_unloads_previous() -> None:
-    """Loading 1.5b after 7b triggers unload + new load (spec §8.1)."""
+def test_scheduler_scene_switch_same_api_model_no_unload() -> None:
+    """REASON → EXTRACT both route to deepseek-chat: no unload/reload churn."""
     fake = _FakeRedis()
     backend = _FakeBackend()
     hub = _hub(backend)
@@ -600,8 +600,8 @@ def test_scheduler_loads_different_model_unloads_previous() -> None:
     lock2 = sched.load_for_scene_with_lock(Scene.EXTRACT)
     lock2.release()
 
-    assert backend.unload_calls == 1
-    assert len(backend.load_calls) == 2
+    assert backend.unload_calls == 0
+    assert len(backend.load_calls) == 1
 
 
 # ---------------------------------------------------------------------------
