@@ -26,6 +26,7 @@ build/
 .eggs/
 *.egg
 .venv/
+.venv-*/
 venv/
 env/
 .conda/
@@ -59,6 +60,8 @@ dist/
 *~
 .DS_Store
 Thumbs.db
+# Trae IDE 本地工作区（计划文档本地保留，不入库）
+.trae/
 
 # --- Docker ---
 docker-compose.override.yml

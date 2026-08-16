@@ -41,7 +41,7 @@
 |---|---|
 | 领域 | 金融垂直领域 - 智能投研助手 |
 | 核心 | 财报深度解析 Agent |
-| GPU | RTX 4050 Mobile (6GB VRAM) |
+| 算力 | LLM 走 DeepSeek API（2026-08-16 变更，原 6GB VRAM 本地训练方案作废） |
 | 形态 | 个人技术作品 Demo |
 | 深度 | 全栈均衡型（解析+抽取+推理+生成） |
 
@@ -52,11 +52,11 @@
 ### 0.5 技术栈概览
 
 - **主后端**：Java 21 + SpringBoot 3.x + Spring WebFlux + Spring Security
-- **AI 服务**：Python 3.11 + FastAPI + PyTorch 2.x
+- **AI 服务**：Python 3.11 + FastAPI + httpx + sentence-transformers（CPU）
 - **前端**：Vue3 + Element Plus + ECharts
 - **消息队列**：RabbitMQ
 - **存储**：MySQL 8.0 + Milvus 2.x + Redis 7 + MinIO
-- **模型**：Qwen2.5-7B-Instruct（4-bit）/ Qwen2.5-1.5B（QLoRA）/ bge-small-zh（LoRA）/ LayoutLMv3
+- **模型**：DeepSeek API（deepseek-chat，LLM 推理）/ bge-small-zh-v1.5（本地 CPU embedding，512 维）/ PaddleOCR + PP-Structure（OCR 与表格识别）
 - **部署**：Docker Compose 单机
 
 ---
@@ -78,20 +78,17 @@
 └────────────────────────┬────────────────────────────────────┘
                          │ RabbitMQ + HTTP/SSE (内部)
 ┌────────────────────────▼────────────────────────────────────┐
-│  L3 AI 服务层  Python 3.11 + FastAPI + PyTorch 2.x            │
+│  L3 AI 服务层  Python 3.11 + FastAPI + httpx                  │
 │     · Document Parser · Extractor · Reasoner · Generator     │
 │     · Agent Orchestrator（ReAct + Tool Use）                 │
-│     · 模型加载/推理/向量化 · 训练入口（独立 CLI）              │
+│     · 模型路由（ModelHub：API 生成 + 本地 embedding）         │
 └────────────────────────┬────────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────────┐
-│  L4 模型层                                                    │
-│   · Qwen2.5-7B-Instruct (4-bit GPTQ)     — 主推理（本地）     │
-│   · Qwen2.5-1.5B-Instruct (QLoRA 微调)   — 财报抽取专项       │
-│   · bge-small-zh-v1.5 (LoRA 微调)        — 金融领域 embedding │
-│   · LayoutLMv3 (微调)                    — 表格结构识别       │
-│   · PaddleOCR / PP-StructureV2           — OCR 与版式（开箱）  │
-│   · Qwen2.5-72B API（DeepSeek/Qwen）     — 兜底/复杂推理 fallback │
+│  L4 模型层（2026-08-16 起 API 化，本地训练取消）               │
+│   · DeepSeek API (deepseek-chat)         — 主推理（云端 API） │
+│   · bge-small-zh-v1.5 (CPU, 开箱即用)    — embedding（512 维）│
+│   · PaddleOCR / PP-StructureV2           — OCR 与表格识别（开箱）│
 └────────────────────────┬────────────────────────────────────┘
                          │
 ┌────────────────────────▼────────────────────────────────────┐
@@ -109,9 +106,9 @@
 | 决策点 | 选择 | 理由 |
 |---|---|---|
 | 主后端语言 | Java/SpringBoot | 匹配技术栈强项；WebFlux 支持背压 SSE |
-| AI 服务语言 | Python/FastAPI | PyTorch 生态、模型库完备 |
+| AI 服务语言 | Python/FastAPI | 模型/OCR 生态完备 |
 | Java-Python IPC | RabbitMQ + HTTP/SSE | MQ 解耦任务流；HTTP/SSE 传 token |
-| LLM 推理后端 | llama.cpp / vLLM | 6GB VRAM 下 4-bit 7B 可跑（Offload CPU） |
+| LLM 推理后端 | DeepSeek API（deepseek-chat） | 6GB VRAM 本地训练不现实；API 免维护、JSON mode 稳定（2026-08-16 变更） |
 | Agent 编排 | 自研轻量 ReAct 循环 | 避免黑盒依赖，便于展示架构深度 |
 | 向量库 | Milvus（单机模式） | 成熟、支持 IVF/HNSW、可独立部署 |
 | 消息队列 | RabbitMQ | 路由灵活、带管理界面、Demo 部署简单 |
@@ -143,7 +140,7 @@ L3 AI 服务层 (Python/FastAPI)
 ├── M8  勾稽与异常      Reasoner（勾稽核对、同比环比、异常规则）
 ├── M9  Agent 编排      AgentOrchestrator（ReAct 循环 + Tool Use）
 ├── M10 报告生成        ReportGenerator（NLG + 图表 + Markdown→PDF）
-└── M11 模型与训练      ModelHub（推理/向量化） + Trainer（QLoRA/LoRA CLI）
+└── M11 模型接入        ModelHub（API 路由 + 本地 embedding，2026-08-16 起训练已取消）
 ```
 
 ### 2.2 L2 应用层模块
@@ -180,13 +177,13 @@ L3 AI 服务层 (Python/FastAPI)
 #### M6 文档解析（DocumentParser）
 - **PDF→页面**：PyMuPDF 提取文本+图像（DPI=200）
 - **版式分析**：PP-StructureV2 识别标题/正文/表格/页眉页脚
-- **表格识别**：LayoutLMv3 微调模型 + PP-Structure 表格还原（HTML）
+- **表格识别**：PP-StructureV2 表格还原（HTML），开箱即用不做微调（2026-08-16 变更，原 LayoutLMv3 微调方案作废）
 - **OCR 兜底**：扫描件走 PaddleOCR
 - 输出：`Document` 对象 = `[Page{blocks:[TextBlock, TableBlock]}]`
 
 #### M7 科目抽取（Extractor）
 - **输入**：三张表的 TableBlock（HTML/JSON）
-- **模型**：Qwen2.5-1.5B QLoRA 微调（财报抽取专项）
+- **模型**：DeepSeek API deepseek-chat（json_mode 强约束输出，2026-08-16 变更，原 Qwen2.5-1.5B QLoRA 方案作废）
 - **Schema 输出**（JSON，强约束）：
   ```json
   {
@@ -233,15 +230,13 @@ L3 AI 服务层 (Python/FastAPI)
 - **图表**：ECharts 服务端渲染为 PNG（资产结构饼图、营收趋势折线、现金流柱状）
 - **导出**：Markdown → PDF（WeasyPrint）
 
-#### M11 模型与训练（ModelHub + Trainer）
-- **ModelHub**：统一模型加载/推理入口，支持本地 + API 双通道
-  - `load_llm(name, quant)` / `generate(prompt, **kwargs)` / `embed(texts)`
-  - LRU 模型缓存（按显存预算调度，6GB 一次只装一个 7B + 一个 small）
-- **Trainer**：独立 CLI（`finreport-train`），三个子命令：
-  - `train-extractor` — Qwen2.5-1.5B QLoRA
-  - `train-embedder` — bge-small-zh LoRA
-  - `train-layoutlm` — LayoutLMv3 微调
-  - 训练数据从 MySQL/MinIO 加载，产出 LoRA adapter 存 `models/`
+#### M11 模型接入（ModelHub；2026-08-16 起 Trainer 取消）
+- **ModelHub**：统一模型路由入口（API 生成 + 本地 embedding）
+  - `generate(prompt, **kwargs)` → DeepSeekBackend（httpx 调 DeepSeek chat/completions，支持 json_mode）
+  - `embed(texts)` → BgeSmallEmbedder（bge-small-zh-v1.5 CPU，512 维归一化，进程内单例）
+  - `load_llm(name, quant)` / `load_for_scene(scene)` 幂等（API 无需真实加载）
+- **重试策略**：429/5xx/网络错误指数退避（1s, 2s）重试 2 次；4xx 不重试
+- ~~Trainer 独立 CLI~~（原 QLoRA/LoRA/LayoutLMv3 微调方案已作废，见决策记录 2026-08-16）
 
 ### 2.4 模块依赖关系
 
@@ -258,8 +253,8 @@ M1 ─ M2 ─┬─ M6 ─ M7 ─ M8 ─ M9 ─ M10
 ### 2.5 关键设计原则
 
 1. **模块隔离**：每个 L3 模块独立 FastAPI router，单独可测、可单独重启
-2. **模型与业务解耦**：所有模型调用走 M11 ModelHub，业务层不直接 import transformers
-3. **失败可降级**：本地 7B 失败 → API 72B；抽取小模型失败 → 7B 兜底
+2. **模型与业务解耦**：所有模型调用走 M11 ModelHub，业务层不直接 import transformers（BgeSmallEmbedder 是唯一例外入口，属 ModelHub 内部）
+3. **失败可降级**：API 重试 2 次后仍失败 → LLMReviewer 降级保留规则结果 / ReportGenerator 降级模板报告
 4. **配置驱动**：模型路由、阈值、工具开关全部走 M5 配置中心
 
 ---
@@ -367,7 +362,7 @@ RabbitMQ 用 4 类 exchange + 6 个核心队列：
 
 **关键设计**：
 - L2 不再直接 HTTP 调 L3，而是发布消息；L3 处理完后通过 `progress.exchange` 异步回报
-- 三表并行天然实现：3 条 `extract.*` 消息由 3 个独立 worker 消费（prefetch=1 防显存抢占）
+- 三表并行天然实现：3 条 `extract.*` 消息由 3 个独立 worker 消费（prefetch=1 保留，防 API 并发过载）
 - L2 用 `ConcurrentNavigableMap<taskId, SseEmitter>` 维护活跃 SSE 连接，收到 progress 消息时按 `taskId` 路由
 - **任务编排从"同步等"变成"事件驱动"**：L2 监听 progress 事件，在 EXTRACT 三条都到达后自动触发 CHECK（用 `AtomicInteger` 计数 + Redis 状态机）
 
@@ -491,7 +486,7 @@ stateDiagram-v2
        │ 1.遍历 data/raw_reports/
        │ 2.调用 M6 DocumentParser 解析
        │ 3.按段落 + 表格行切块（chunk_size=512, overlap=64）
-       │ 4.调用 M11 ModelHub.embed()  (bge-small-zh LoRA)
+       │ 4.调用 M11 ModelHub.embed()  (bge-small-zh-v1.5 本地 CPU)
        │ 5.写 Milvus collection: fin_kb
        │ 6.写 MySQL: kb_chunks 元数据
        ▼
@@ -501,30 +496,25 @@ stateDiagram-v2
 
 **调度**：手动触发 + 每周定时（cron）增量更新。Demo 阶段预置 50-100 份 A 股年报即可。
 
-### 3.5 辅助链路 D：模型推理路由
+### 3.5 辅助链路 D：模型推理路由（2026-08-16 起 API 化）
 
 ```
 [业务请求] → ModelHub.route(scene)
                 │
-                ├── scene=EXTRACT → Qwen2.5-1.5B QLoRA (本地, 4-bit)
-                ├── scene=REASON  → Qwen2.5-7B-Instruct (本地, 4-bit GPTQ)
-                ├── scene=REASON_FALLBACK → Qwen2.5-72B API
-                ├── scene=EMBED   → bge-small-zh LoRA (本地)
-                └── scene=LAYOUT  → LayoutLMv3 (本地)
+                ├── scene=EXTRACT → DeepSeek API deepseek-chat（json_mode）
+                ├── scene=REASON  → DeepSeek API deepseek-chat
+                └── scene=EMBED   → bge-small-zh-v1.5（本地 CPU，512 维归一化）
 ```
 
-**显存调度**：6GB VRAM 单次只能装 1 个 7B(4bit~5GB) 或 1 个 1.5B + 1 个 small。ModelHub 维护 `model_lock`，按需 unload/load，LRU 策略。频繁切换会拖慢响应，所以：
-- EXTRACT 链路里**只**用 1.5B（不切 7B）
-- REASON 链路里**只**用 7B（不切 1.5B）
-- 通过任务编排避免显存抖动
+**API 策略**：无本地显存争用，`model_lock`/LRU 调度已移除。429/5xx/网络错误指数退避（1s, 2s）重试 2 次；4xx 不重试直接抛 `AiException`。单任务约 8-12 次调用（三表+复核+报告），估算单份年报 ¥0.5-1。
 
-### 3.6 辅助链路 E：训练数据回流（闭环，可选）
+### 3.6 辅助链路 E：问答数据回流（2026-08-16 调整，原训练回流作废）
 
 ```
-[用户问答] → [日志] → [人工标注界面(简易)] → [训练集] → [Trainer 增量微调]
+[用户问答] → [日志] → [train_log 表] → [SQL 导出脚本]
 ```
 
-Demo 阶段做最简版：所有问答 + 抽取结果落 `train_log` 表，提供 SQL 导出脚本，方便后续增量训练。不做自动闭环。
+本地训练已取消，回流数据仅作数据积累（可用于后续 prompt 优化或人工分析），不再服务增量微调。不做自动闭环。
 
 ### 3.7 关键时序约束（SLA）
 
@@ -548,249 +538,89 @@ Demo 阶段做最简版：所有问答 + 抽取结果落 `train_log` 表，提�
 | 重复消费 | 消息体带 `idempotency_key = taskId + step`，L3 用 Redis SETNX 去重；重试次数通过消息属性 `headers.x-retry-count` 传递 |
 | 消息乱序 | 同一 taskId 的 step 用 RabbitMQ 的 `priority` 字段 + L2 状态机校验 |
 
-### 3.9 显存调度（MQ 视角）
+### 3.9 API 并发控制（MQ 视角；2026-08-16 起替代显存调度）
 
-- `q.parse.requests`、`q.extract.requests`、`q.reason.requests` 的 consumer 各自 `prefetch=1`
-- 但**全局只能有 1 个 7B 或 1 个 1.5B+small 在显存里**
-- L3 用一个**全局 model_lock**（Redis 分布式锁）：消费消息前先获取对应模型的 lock，拿不到就 nack(requeue=true, delay=2s)
-- 这样多 worker 进程不会同时加载冲突模型
+- `q.parse.requests`、`q.extract.requests`、`q.reason.requests` 的 consumer 各自 `prefetch=1`（保留，防 API 并发过载触发限流）
+- 原 Redis model_lock / VRAM 驱逐机制已移除（API 无显存争用）
+- DeepSeek 429 限流由 backend 指数退避重试兜底；三表经 ExtractDispatcher 串行投递，无并发放大
 
 ### 3.10 并发与一致性
 
-- **任务并发**：单用户最多 1 个解析任务在跑（防 6GB 显存被打爆）；问答不限
+- **任务并发**：单用户最多 1 个解析任务在跑（控 API 成本与 parse 资源占用）；问答不限
 - **数据一致性**：财报解析期间所有写入走同一个 `taskId` 事务边界，失败时 `task` 标记 FAILED，关联数据保留（用于排查），不强制回滚
 - **缓存**：抽取结果按 `pdf_md5 + step` 缓存到 Redis（TTL 7d），重传同文件直接命中
 
 ---
+## 4. API 集成与模型接入（2026-08-16 重写，原训练设计作废）
 
-## 4. Transformer 训练设计
+> 本章原为「Transformer 训练设计」（QLoRA T1/T2/T3），因 6GB VRAM 本地训练不现实整体作废。
+> 变更决策见 `docs/decisions/2026-08-16-m4-pivot-deepseek-api-rag.md`。
 
-### 4.1 训练任务总览
+### 4.1 模型接入总览
 
-| 编号 | 任务 | 基座 | 方法 | 数据量 | 显存峰值 | 预计耗时 |
-|---|---|---|---|---|---|---|
-| T1 | 财报科目抽取专项 | Qwen2.5-1.5B-Instruct | QLoRA (4-bit) + LoRA (r=16) | 5k 样本 | ~5.2 GB | ~3 h (3 epoch) |
-| T2 | 金融领域 embedding | bge-small-zh-v1.5 | LoRA (r=8) + 对比学习 | 20k 正负对 | ~3.8 GB | ~2 h |
-| T3 | 财报表格结构识别 | LayoutLMv3-base | 全参微调（frozen backbone + 头部训练） | 2k 表格图 | ~4.5 GB | ~4 h |
-
-**总训练时长约 9 小时**，6GB VRAM 下分批跑完全可行。
-
-### 4.2 T1：财报科目抽取专项模型
-
-#### 4.2.1 目标
-让 1.5B 小模型在"财报表格 → 结构化 JSON"任务上接近甚至超过 7B 通用模型，节省显存。
-
-#### 4.2.2 训练数据
-- **来源**：
-  1. 巨潮资讯网（cninfo）爬取 A 股年报 PDF（覆盖 10 个行业 × 5 家公司 × 3 年 = 150 份）
-  2. 用 PP-Structure + 人工校对生成三表 ground truth JSON
-  3. 数据增强：同义科目名替换（"货币资金" ↔ "现金及银行存款"）、单位换算、行序打乱
-- **格式**（ChatML 多轮）：
-  ```
-  <|im_start|>system
-  你是财报抽取助手，输出严格 JSON。
-  <|im_end|>
-  <|im_start|>user
-  抽取以下表格的科目数据：
-  [表格 HTML]
-  <|im_end|>
-  <|im_start|>assistant
-  {"report_period":"2024-12-31","statements":{"balance_sheet":[...]}}
-  <|im_end|>
-  ```
-- **切分**：训练 4500 / 验证 300 / 测试 200
-
-#### 4.2.3 训练配置
-```python
-# 关键超参（PEFT + bitsandbytes）
-base_model: Qwen2.5-1.5B-Instruct
-load_in_4bit: True
-bnb_4bit_quant_type: nf4
-bnb_4bit_compute_dtype: bfloat16
-lora_r: 16
-lora_alpha: 32
-lora_target_modules: [q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj]
-lora_dropout: 0.05
-learning_rate: 2e-4
-batch_size: 1
-gradient_accumulation_steps: 16  # 等效 batch=16
-max_seq_length: 2048
-warmup_ratio: 0.03
-lr_scheduler_type: cosine
-num_train_epochs: 3
-optimizer: paged_adamw_8bit  # 8bit 优化器，省显存
-gradient_checkpointing: True
-```
-
-#### 4.2.4 显存预算（6GB）
-| 项 | 占用 |
-|---|---|
-| 1.5B 4-bit 权重 | ~1.0 GB |
-| LoRA 参数 | ~30 MB |
-| 激活值（seq=2048, grad_ckpt） | ~2.5 GB |
-| 8bit 优化器状态 | ~0.6 GB |
-| 中间张量 + PyTorch 缓存 | ~1.0 GB |
-| **合计** | **~5.1 GB** ✅ |
-
-#### 4.2.5 评估指标
-- **JSON 解析率**：输出能解析为合法 JSON 的比例（目标 > 95%）
-- **字段 F1**：科目名/数值/单位/期间四字段的 F1（目标 > 0.85）
-- **数值准确率**：数值完全一致的比例（目标 > 0.90）
-- **对比基线**：vs 未微调 Qwen2.5-1.5B、vs Qwen2.5-7B-Instruct 通用 prompt
-
-### 4.3 T2：金融领域 embedding 微调
-
-#### 4.3.1 目标
-通用 bge-small-zh 在金融术语（如"商誉减值"、"递延所得税资产"、"经营活动产生的现金流量净额"）上召回率偏低。微调后提升 `search_kb` 在金融语料上的检索质量。
-
-#### 4.3.2 训练数据
-- **正样本对**：
-  1. 同一科目不同表述（"应收账款" ↔ "应收帐款" ↔ "Trade receivables"）
-  2. 财报段落 ↔ 其摘要
-  3. 用户问题 ↔ 对应财报段落（基于历史问答日志构造）
-- **负样本**：同 batch 内其他段落 + 困难负例（同行业不同公司）
-- **规模**：20k 正对 + 60k 负例（InfoNCE 内 batch 构造）
-- **格式**：`(query, positive, [negatives])` 三元组
-
-#### 4.3.3 训练配置
-```python
-base_model: BAAI/bge-small-zh-v1.5  # 33M 参数, 512 dim
-method: LoRA (r=8, alpha=16, target: query, key, value)
-loss: InfoNCE (in-batch negatives + hard negatives)
-temperature: 0.02
-learning_rate: 5e-5
-batch_size: 32  # 33M 模型显存压力小
-max_seq_length: 256
-num_train_epochs: 5
-```
-
-#### 4.3.4 评估指标
-- **MRR@10**：在 200 条金融检索 query 上的平均倒数排名（目标 > 0.78）
-- **Recall@5**：前 5 命中率（目标 > 0.85）
-- **对比基线**：vs 原版 bge-small-zh、vs bge-large-zh（未微调）
-
-### 4.4 T3：财报表格结构识别
-
-#### 4.4.1 目标
-通用 PP-Structure 对复杂财报表格（合并单元格、跨页、多级表头）识别准确率不够。微调 LayoutLMv3 提升 cell 检测与结构还原。
-
-#### 4.4.2 任务拆分
-LayoutLMv3 在本项目中做 **2 个子任务**：
-1. **Cell Detection**：检测表格单元格 bbox（Token + Layout → bbox）
-2. **Cell Classification**：分类单元格角色（表头/数据/合计行/单位行）
-
-#### 4.4.3 训练数据
-- **来源**：从 T1 的 150 份年报中标注 2000 个表格（用 Label Studio）
-- **增强**：旋转 ±5°、加噪、压缩、变色
-- **格式**：每张表格图 = 图像 + 单词 bbox 列表 + 单词 token + 单元格分组标签
-
-#### 4.4.4 训练配置
-```python
-base_model: microsoft/layoutlmv3-base
-# 冻结 backbone 80%, 只微调后 4 层 + 分类头
-freeze_layers: 0..8  # 共 12 层, 冻结前 8 层
-trainable: encoder.layer.{8,9,10,11} + head
-method: 全参微调 (frozen backbone 部分)
-learning_rate: 5e-5  # backbone 微调部分
-head_lr: 1e-4  # 头部
-batch_size: 2
-gradient_accumulation_steps: 8
-max_steps: 5000
-image_size: 224
-```
-
-#### 4.4.5 显存预算
-| 项 | 占用 |
-|---|---|
-| LayoutLMv3-base (135M, fp16) | ~0.27 GB |
-| 可训练参数 (后4层+头, ~30M) | ~60 MB |
-| 激活值 (bs=2, 224×224, seq=512) | ~3.2 GB |
-| 优化器状态 (AdamW) | ~0.7 GB |
-| 其他 | ~0.3 GB |
-| **合计** | **~4.5 GB** ✅ |
-
-#### 4.4.6 评估指标
-- **Cell mAP@0.5**：单元格检测平均精度（目标 > 0.88）
-- **Cell 角色分类 F1**（目标 > 0.85）
-- **端到端表格还原 TEDS**（目标 > 0.82）
-
-### 4.5 训练流水线架构
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  scripts/finreport-train (CLI)                          │
-│   ├── train-extractor  (T1)                             │
-│   ├── train-embedder   (T2)                             │
-│   └── train-layoutlm   (T3)                             │
-└────────────────────────┬────────────────────────────────┘
-                         │
-        ┌────────────────┼────────────────┐
-        ▼                ▼                ▼
-   [数据加载层]      [训练引擎]        [评估层]
-   MySQL/MinIO      PEFT+Transformers  metrics.py
-   → Dataset        +bitsandbytes       +对比基线
-   → DataLoader     +accelerate
-                         │
-                         ▼
-              [产物: LoRA adapter]
-              models/{task}/adapter_{step}/
-                         │
-                         ▼
-              [自动评估 + 选最佳]
-              models/{task}/best/
-                         │
-                         ▼
-              [注册到 ModelHub]
-              MySQL: model_registry 表
-```
-
-### 4.6 训练数据管理
-
-| 数据集 | 存储 | 标注工具 | 标注量 |
+| 能力 | 实现 | 部署位置 | 说明 |
 |---|---|---|---|
-| T1 抽取数据 | MinIO `data/training/extractor/` | 自研 Web 标注页（Vue） | 5k 样本 |
-| T2 embedding 对 | MySQL `train_pairs` 表 | 脚本自动生成 + 人工抽检 | 20k 对 |
-| T3 表格标注 | MinIO `data/training/layoutlm/` | Label Studio | 2k 表格 |
+| LLM 生成 | DeepSeek API（deepseek-chat） | 云端 | OpenAI 兼容协议，httpx 直连，支持 json_mode |
+| Embedding | bge-small-zh-v1.5 | 本地 CPU | sentence-transformers，512 维归一化，进程内单例 |
+| OCR / 表格识别 | PaddleOCR + PP-StructureV2 | 本地 CPU | 开箱即用，不做微调 |
 
-**数据版本化**：用 DVC（Data Version Control）跟踪数据集版本，与 LoRA adapter 版本绑定，可复现。
+### 4.2 DeepSeekBackend（LlmBackend 实现）
 
-### 4.7 模型注册与版本管理
+- **协议**：`POST {base_url}/chat/completions`，`Authorization: Bearer {LLM_API_KEY}`
+- **请求体**：`{model, messages:[{role:"user",content:prompt}], max_tokens, temperature}`；
+  `json_mode=True` 时附加 `response_format: {"type":"json_object"}`（extractor / llm_reviewer 场景启用）
+- **重试**：429 / 5xx / 网络错误 → 指数退避（1s, 2s）重试 2 次；4xx 不重试
+- **超时**：`timeout_seconds` 透传 httpx；全部重试耗时后仍超时 → `InferenceTimeoutException`
+- **结果映射**：`GenerateResult{text, prompt_tokens, completion_tokens, latency_ms, first_token_ms}`，
+  token 计数取自响应 `usage` 字段
+- **配置**：`llm_api_base_url` / `llm_api_key`（环境变量注入）/ `llm_api_model` / `llm_api_max_retries`
+- **降级**：API 失败由业务层兜底——LLMReviewer 保留规则结果（`llm_reviewed=false`），
+  ReportGenerator 走模板 `_fallback()`
 
-MySQL `model_registry` 表：
+### 4.3 BgeSmallEmbedder（本地 embedding）
 
-| 字段 | 说明 |
-|---|---|
-| id | 主键 |
-| task | extractor / embedder / layoutlm |
-| base_model | 基座名 |
-| adapter_path | MinIO 路径 |
-| version | v1.0.0 (语义化) |
-| metrics | JSON（评估指标） |
-| trained_at | 训练时间 |
-| status | candidate / staged / production / archived |
-| trained_by | 训练命令 hash + 数据集版本 |
+- 模型：`models/bge-small-zh-v1.5`（~95MB，`scripts/download_models.py` 下载）
+- 推理：`SentenceTransformer(model_path, device="cpu")`，惰性加载进程内单例
+- 输出：`encode(texts, normalize_embeddings=True, batch_size=32)` → 512 维归一化向量
+  （归一化是 Milvus `metric_type=IP` 的前提，不可关闭）
+- 与 Milvus `fin_kb` collection `dim=512` 匹配，无需重建
 
-ModelHub 启动时加载 `status=production` 的 adapter；新版本训练完先 `candidate`，A/B 评估通过后手动 `staged → production`。
+### 4.4 中间数据通路（handler 间数据传递）
 
-### 4.8 训练监控
+L2 `buildPayload` 只透传任务初始 payload，上游步骤 result 不进入下游消息，因此：
 
-- **过程指标**：TensorBoard / WandB 记录 loss / lr / grad_norm
-- **资源监控**：每 10s 采一次 GPU 利用率、显存占用、温度（防笔记本过热降频）
-- **训练时长保护**：单次训练超 8h 自动 checkpoint + 暂停
+| 通路 | 机制 | 消费方 |
+|---|---|---|
+| parse → extract | parse handler 把 Document JSON 写 MinIO `parsed/{taskId}.json`（uploads bucket） | extract handler 按 taskId 拉取，按表头关键词筛选目标报表表格 |
+| extract → check | L2 StatementWriter 事务写 `financial_statement` 表 | check handler 只读 MySQL 组装 StatementSnapshot |
+| check → report | L2 CheckResultWriter 事务写 `accounting_check` / `anomaly` 表 | report handler 只读 MySQL 组装输入 |
 
-### 4.9 6GB VRAM 训练避坑清单
+- L3 对 MySQL **只读**（`app/core/mysql_client.py`，pymysql，参数化查询），写入仍归 L2——不破坏事务边界
+- compose 的 `MYSQL_*` 环境变量自 M4 起被 L3 消费（原为死配置）
 
-| 坑 | 对策 |
-|---|---|
-| OOM | gradient_checkpointing + paged_adamw_8bit + 4-bit 量化 |
-| 训练慢 | 1.5B 模型 3 epoch 约 3h，可接受；用 accelerate 启用混合精度 |
-| 过拟合 | LoRA r 控制在 8-16；验证集 loss 上升时早停 |
-| 数据质量差 | 训练前先跑 100 样本 dry run，人工抽检 prompt 格式 |
-| 模型加载冲突 | 训练用独立 Python 进程，不与推理服务共享 model_lock |
-| LoRA merge 失败 | 保留 adapter 不 merge，推理时 PEFT 动态加载 |
+### 4.5 模型注册与版本管理
+
+MySQL `model_registry` 表语义调整（结构不变，字段含义更新）：
+
+| 字段 | 原含义 | 新含义 |
+|---|---|---|
+| task | extractor / embedder / layoutlm | extract / reason / embed（对应 Scene） |
+| base_model | 基座名 | API 模型名（deepseek-chat）或 bge-small-zh-v1.5 |
+| adapter_path | MinIO 路径 | 模型标识（API 无本地路径；bge 为 models/ 相对路径） |
+| metrics | JSON（评估指标） | JSON（抽取 F1 / 检索 MRR 等 API 输出评估） |
+| trained_at | 训练时间 | 注册时间 |
+| trained_by | 训练命令 hash | 版本来源（API 版本号 / 模型 revision） |
+
+注册记录：`deepseek-chat`（EXTRACT/REASON 场景）+ `bge-small-zh-v1.5`（EMBED 场景）。
+
+### 4.6 API 成本与用量监控
+
+- 用量来源：GenerateResult 的 prompt_tokens / completion_tokens 汇总进 progress result
+- 成本口径：deepseek-chat 约 ¥2/百万输入 token；单任务约 8-12 次调用，估算单份年报 ¥0.5-1
+- 限流口径：429 触发率纳入 WARN 日志；持续触发时评估降低并发（三表串行已是默认）
+- `train_log` 表保留（问答/抽取结果回流），仅作数据积累，不再服务增量微调
 
 ---
-
 ## 5. 数据层与存储设计
 
 ### 5.1 存储组件全景
@@ -800,7 +630,7 @@ ModelHub 启动时加载 `status=production` 的 adapter；新版本训练完先
 | MySQL 8.0 | 结构化业务数据、科目数据、任务、模型注册、审计 | Docker 单机 |
 | Milvus 2.x | 向量检索（财报段落、表格行、知识库） | Docker 单机模式 |
 | Redis 7 | 会话缓存、任务状态、限流、分布式锁、模型推理缓存 | Docker 单机 |
-| MinIO | 原始 PDF、解析中间产物、报告 PDF、训练数据、LoRA adapter | Docker 单机 |
+| MinIO | 原始 PDF、解析中间产物、报告 PDF（2026-08-16 起：训练数据与 LoRA adapter 存储取消） | Docker 单机 |
 | RabbitMQ | 消息队列 | Docker 单机 |
 
 ### 5.2 MySQL 设计
@@ -1041,7 +871,7 @@ fin:idem:{messageId}                 → String (幂等性, TTL 24h)
 | 任务进度 | Hash | L2 接到 progress 消息后更新，前端断线重连可恢复 |
 | 限流 | String + INCR | 令牌桶简化版 |
 | 抽取缓存 | String | 同 PDF 重传直接命中，省解析+抽取 |
-| 模型锁 | String + NX | 防多 worker 同时加载 7B |
+| 模型锁 | String + NX | （2026-08-16 起：API 模式无本地模型，锁仅遗留；M4.08 移除） |
 | 幂等性 | String + SETNX | MQ 消息去重 |
 
 ### 5.5 MinIO 设计
@@ -1050,11 +880,10 @@ fin:idem:{messageId}                 → String (幂等性, TTL 24h)
 
 ```
 finreport-uploads       原始 PDF (用户上传)
-finreport-artifacts     中间产物 (页面图像、表格 HTML、抽取 JSON)
+finreport-artifacts     中间产物 (页面图像、表格 HTML、parse 产物 JSON)
 finreport-reports       最终报告 (PDF、Markdown、图表 PNG)
-finreport-models        LoRA adapter
-finreport-training      训练数据集
 finreport-backups       数据库/配置备份
+(2026-08-16 起 finreport-models / finreport-training 废弃，本地不再训练模型)
 ```
 
 #### 5.5.2 Object Key 规范
@@ -1381,8 +1210,7 @@ POST   /internal/embed                      批量 embedding
 │   ├── ModelLoadException    模型加载失败         │
 │   ├── InferenceTimeoutException  推理超时        │
 │   ├── ParseException        PDF 解析失败         │
-│   ├── ExtractException      抽取失败 (JSON 异常) │
-│   └── OomException          显存溢出             │
+│   └── ExtractException      抽取失败 (JSON 异常) │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -1390,9 +1218,9 @@ POST   /internal/embed                      批量 embedding
 
 | 场景 | 检测 | 降级动作 |
 |---|---|---|
-| 本地 7B 推理超时 (>60s) | 推理 watchdog | 切 Qwen API 72B 兜底；记录 fallback 计数 |
-| 本地 7B OOM | CUDA OOM 异常 | 释放模型 → 重启 ModelHub → 重试 1 次 → 仍失败转 API |
-| 抽取小模型 JSON 解析失败 | json.loads 异常 | 重试 1 次（temperature=0.1）→ 仍失败改用 7B 抽取 |
+| DeepSeek API 超时 (>60s) | 推理 watchdog | InferenceTimeoutException 上抛；LLMReviewer 降级保留规则结果 / ReportGenerator 降级模板报告 |
+| API 429/5xx/网络错误 | 状态码/TransportError | 指数退避（1s, 2s）重试 2 次；耗尽后按上述业务层兜底 |
+| 抽取 JSON 解析失败 | json.loads 异常 | 重试 1 次（temperature=0.1）→ 仍失败标记步骤 FAILED |
 | Milvus 不可用 | 连接异常 | search_kb 工具返回"知识库暂不可用"，问答链路继续 |
 | MySQL 死锁 | deadlock 异常 | 自动重试 3 次（指数退避） |
 | RabbitMQ 投递失败 | confirm 未 ack | 持久化到 `outbox` 表，后台任务补偿重投 |
@@ -1464,7 +1292,7 @@ DLQ 监控告警：DLQ 长度 > 10 触发告警。
 | `http_request_duration_seconds` | Histogram | HTTP P50/P95/P99 |
 | `mq_queue_size` | Gauge | 各队列积压 |
 | `mq_dlq_size` | Gauge | 死信队列长度（告警阈值 10） |
-| `gpu_memory_used_bytes` | Gauge | GPU 显存占用 |
+| `gpu_memory_used_bytes` | Gauge | （2026-08-16 起：本地 GPU 栈移除，指标废弃；可换接 API latency/token 用量） |
 | `gpu_utilization_percent` | Gauge | GPU 利用率 |
 | `model_load_count` | Counter | 模型加载次数 |
 | `jvm_heap_used_bytes` | Gauge | JVM 堆 |
@@ -1555,29 +1383,26 @@ class ReportUploadIntegrationTest {
 1. 端到端财报解析（含 3 表并行、勾稽、报告生成）
 2. SSE 重连（断线后 Last-Event-ID 恢复）
 3. MQ 死信流转
-4. 模型降级（mock 7B 超时 → 切 API）
+4. API 失败降级（mock 429/超时 → 重试 → LLMReviewer/ReportGenerator 兜底）
 5. 限流触发
 
-#### 7.3.4 模型评估（独立测试集）
+#### 7.3.4 模型评估（独立测试集，2026-08-16 起调整为 API 输出评估）
 
-**T1 抽取评估** `scripts/eval_extractor.py`：
+**抽取评估** `scripts/eval_m2_f1.py`（对 DeepSeek API 真实输出）：
 
 ```python
-# 加载测试集 200 条
+# 加载基准数据集
 # 输出：
 {
   "json_parse_rate": 0.97,
   "field_f1": {"item_name": 0.92, "value": 0.88, "unit": 0.95, "period": 0.91},
-  "numeric_accuracy": 0.90,
-  "baseline_qwen7b": {...},
-  "baseline_qwen15b_unfinetuned": {...}
+  "numeric_accuracy": 0.90
 }
 ```
 
-**T2 embedding 评估** `scripts/eval_embedder.py`：MRR@10、Recall@5
-**T3 LayoutLM 评估** `scripts/eval_layoutlm.py`：Cell mAP、TEDS
+**Embedding 评估** `scripts/eval_embedder.py`：MRR@10、Recall@5（M5 RAG 实施时启用）
 
-每次模型版本变更触发 CI 跑评估，结果写入 `model_registry.metrics`。
+API 模型版本变更或 prompt 调整后手动跑评估，结果写入 `model_registry.metrics`。
 
 #### 7.3.5 E2E 测试
 
@@ -1620,11 +1445,12 @@ Playwright 自动化：
 
 | 风险 | 概率 | 影响 | 对策 |
 |---|---|---|---|
-| 6GB VRAM 训练 OOM | 高 | 训练中断 | 严格按 §4 显存预算；监控告警 |
-| 小模型效果差 | 中 | 抽取准确率低 | 预留 7B API fallback；增加训练数据 |
+| API 超时/限流（429） | 中 | 链路变慢或失败 | 指数退避重试 2 次；LLMReviewer/ReportGenerator 业务层兜底 |
+| API 输出 JSON 不合法 | 中 | 抽取失败 | json_mode + validator 重试（temp=0.1）|
+| API Key 泄露 | 低 | 成本风险 | 仅环境变量注入，不入库不入 git |
 | MQ 消息丢失 | 低 | 任务卡死 | 持久化 + ack + outbox 模式 |
 | PDF 解析失败率高 | 中 | 用户体验差 | 兜底 OCR；预处理清洗 |
-| 财报表格复杂度超预期 | 中 | 表格还原差 | LayoutLM 微调 + 人工标注兜底 |
+| 财报表格复杂度超预期 | 中 | 表格还原差 | PP-Structure 调参 + 多格式样例覆盖 |
 
 ---
 
@@ -1638,7 +1464,7 @@ Playwright 自动化：
 Week 1-2  │ M1: 基础设施 + 骨架打通      │ 能上传 PDF → 走通 MQ → 落库
 Week 3-4  │ M2: 解析 + 抽取闭环          │ 能上传 → 解析 → 三表入库展示
 Week 5-6  │ M3: 勾稽 + 异常 + 报告生成   │ 完整财报解析链路可演示
-Week 7-8  │ M4: 模型微调 T1/T2/T3        │ 替换通用模型，效果提升
+Week 7-8  │ M4: API 化重构 + 全链路去 mock │ DeepSeek API 接入，真实链路（2026-08-16 变更）
 Week 9-10 │ M5: Agent 问答 + 知识库      │ ReAct 问答可用
 Week 11-12│ M6: 前端打磨 + 评估 + 发布   │ 可对外演示的 Demo
 ```
@@ -1671,10 +1497,9 @@ Week 11-12│ M6: 前端打磨 + 评估 + 发布   │ 可对外演示的 Demo
 
 **任务清单**：
 - [ ] L3 M6 DocumentParser：PyMuPDF + PP-Structure 集成
-- [ ] L3 M6 表格识别：先用 PP-Structure 自带（LayoutLM 微调留到 M4）
-- [ ] L3 M7 Extractor：先用 Qwen2.5-7B 通用 prompt
-- [ ] L3 M11 ModelHub：vLLM/llama.cpp 加载 4-bit 7B
-- [ ] L3 M11 显存调度 + model_lock
+- [ ] L3 M6 表格识别：PP-Structure 自带（2026-08-16 起 LayoutLM 微调方案作废）
+- [ ] L3 M7 Extractor：DeepSeek API 通用 prompt（M2 期为 mock，M4 接真实 API）
+- [ ] L3 M11 ModelHub：scene 路由骨架（M4 接 DeepSeekBackend）
 - [ ] L2 三表并行抽取（CompletableFuture + 3 个 extract 消息）
 - [ ] L2 抽取结果写 financial_statement 表
 - [ ] 前端三表展示页（可编辑表格组件）
@@ -1699,26 +1524,23 @@ Week 11-12│ M6: 前端打磨 + 评估 + 发布   │ 可对外演示的 Demo
 
 **验收标准**：上传年报 → 4 分钟内出报告 → 勾稽准确率 ≥ 0.90。
 
-#### M4（Week 7-8）：模型微调 T1/T2/T3
+#### M4（Week 7-8）：API 化重构 + 全链路去 mock（2026-08-16 变更，原微调任务作废）
 
-**目标**：训练 3 个微调模型并替换通用模型，效果提升。
+**目标**：DeepSeek API 接入 ModelHub，解析/抽取/勾稽/报告全链路真实数据打通。
 
 **任务清单**：
-- [ ] 数据采集：爬取 150 份 A 股年报（巨潮）
-- [ ] T1 数据标注：自研 Web 标注页 + 标注 5k 抽取样本
-- [ ] T1 训练：Qwen2.5-1.5B QLoRA（~3h）
-- [ ] T1 评估：F1、对比基线
-- [ ] T2 数据构造：20k embedding 正负对
-- [ ] T2 训练：bge-small-zh LoRA（~2h）
-- [ ] T2 评估：MRR@10、Recall@5
-- [ ] T3 数据标注：Label Studio 标注 2k 表格
-- [ ] T3 训练：LayoutLMv3 微调（~4h）
-- [ ] T3 评估：Cell mAP、TEDS
-- [ ] ModelHub 集成：动态加载 LoRA adapter
-- [ ] model_registry 表注册 + 版本管理
-- [ ] A/B 对比：微调前后效果对比报告
+- [ ] 架构变更落档：决策记录 + spec/AGENTS/skills/progress 同步
+- [ ] DeepSeekBackend 实现 + ModelHub API 路由改造 + 单测（mock httpx）
+- [ ] 数据通路-解析侧：parse 产物落 MinIO + 表格识别开启
+- [ ] extractor handler 去 mock（MinIO 拉 parse 产物 + 三表真实抽取）
+- [ ] 数据通路-查询侧：L3 只读 MySQL 客户端 + check handler 去 mock
+- [ ] generator handler 新增 + report 路由切换（报告+图表+PDF）
+- [ ] BgeSmallEmbedder 实装 + ModelHub.embed()（512 维归一化）
+- [ ] 本地 GPU 栈移除：vram_scheduler/TransformersBackend/依赖/配置 + 测试清理
+- [ ] 部署调整：Dockerfile CPU wheel + compose 注入 LLM_API_KEY
+- [ ] model_registry 注册 + 端到端验证（真实 PDF → API 全链路）
 
-**验收标准**：T1 F1 ≥ 0.85；T2 MRR ≥ 0.78；T3 mAP ≥ 0.88；端到端抽取 F1 ≥ 0.85。
+**验收标准**：真实 PDF 全链路无 mock；抽取 F1 ≥ 0.85（eval_m2_f1 对 API 输出）；embed() 返回 512 维归一化向量；prod 镜像 < 3GB；CI 全绿。
 
 #### M5（Week 9-10）：Agent 问答 + 知识库
 
@@ -1758,41 +1580,34 @@ Week 11-12│ M6: 前端打磨 + 评估 + 发布   │ 可对外演示的 Demo
 ### 8.3 关键依赖与并行机会
 
 ```
-M1 ── M2 ── M3 ── M6 (前端打磨+评估+发布)
-            │
-            └── M4 (微调) ──┘
-                      │
-                      └── M5 (问答) ──┘
+M1 ── M2 ── M3 ── M4 (API 化重构+去 mock) ── M5 (问答+RAG) ── M6 (打磨+发布)
 ```
 
-- M4 微调可与 M3 后期并行（数据标注在 M2 就开始）
-- M5 问答依赖 M4 的 embedder，但工具实现可提前到 M3 期
+- M5 问答依赖 M4 的 API 链路与 embedder，但工具实现可提前到 M3 期
 - 前端开发贯穿全程，每阶段同步推进
 
 ### 8.4 风险与缓冲
 
 | 风险 | 缓冲策略 |
 |---|---|
-| 微调效果不达预期 | M4 预留 1 周缓冲；不达标则增加数据或回退到 7B 通用 prompt |
-| 6GB VRAM 训练 OOM | 提前在 M1 末做训练 dry run 验证显存预算 |
-| 数据标注耗时 | M2 开始就启动标注，与开发并行 |
-| 端到端 SLA 不达标 | M3 末做性能 profiling，瓶颈在显存切换则优化 model_lock 策略 |
+| API 抽取效果不达预期 | 调整 prompt + few-shot；加 validator 重试；必要时更换模型版本 |
+| API 限流/超时 | 指数退避重试 + 业务层兜底（规则结果保留、模板报告） |
+| 端到端 SLA 不达标 | M3 末做性能 profiling，瓶颈在 API 调用则并行化三表抽取 |
 
 ### 8.5 资源投入假设
 
-按个人全职投入估算（每周 50-60h，含调试缓冲）：
-- 开发：~480h
-- 训练 + 标注：~120h
+按个人全职投入估算（每周 50-60h，含调试缓冲，2026-08-16 起训练工时取消）：
+- 开发：~560h
 - 测试 + 评估：~80h
 - 文档 + 演示：~40h
-- **总计 ~720h**（12 周 × 60h）
+- **总计 ~680h**（12 周 × ~57h）
 
 ### 8.6 交付物清单
 
 | 类别 | 交付物 |
 |---|---|
 | 代码 | backend / ai-service / frontend / deploy / scripts |
-| 模型 | 3 个 LoRA adapter（MinIO 存储） |
+| 模型接入 | DeepSeek API 配置 + bge-small-zh-v1.5 本地 embedding（2026-08-16 起，无本地训练产物） |
 | 数据 | 30 份基准年报 + 评估 ground truth |
 | 文档 | spec.md / 部署文档 / API 文档 / 评估报告 / README |
 | 演示 | 演示视频（5-10 分钟）+ 项目博客 |
@@ -1807,21 +1622,16 @@ M1 ── M2 ── M3 ── M6 (前端打磨+评估+发布)
 | BS | Balance Sheet 资产负债表 |
 | IS | Income Statement 利润表 |
 | CF | Cash Flow Statement 现金流量表 |
-| QLoRA | Quantized Low-Rank Adaptation 量化低秩微调 |
-| LoRA | Low-Rank Adaptation 低秩微调 |
 | ReAct | Reasoning + Acting 推理行动循环 |
-| TEDS | Tree-Edit-Distance-based Similarity 表格还原相似度 |
 | MRR | Mean Reciprocal Rank 平均倒数排名 |
 | MQ | Message Queue 消息队列 |
 | SSE | Server-Sent Events 服务器推送事件 |
+| RAG | Retrieval-Augmented Generation 检索增强生成 |
 
 ## 附录 B：参考资料
 
-- Qwen2.5 技术报告
-- PEFT (Parameter-Efficient Fine-Tuning) 库
-- bitsandbytes 量化库
-- LayoutLMv3 论文
-- BGE embedding 模型
+- DeepSeek API 文档（OpenAI 兼容协议）
+- BGE embedding 模型（bge-small-zh-v1.5）
 - RabbitMQ 官方文档
 - Spring WebFlux 文档
 - Milvus 官方文档

@@ -19,11 +19,12 @@ for bucket in finreport-uploads finreport-artifacts finreport-models finreport-t
 done
 mc anonymous set download "$MINIO_ALIAS/finreport-reports" >/dev/null
 
-# mc 在没有生命周期配置时返回非零；已有配置时不重复添加规则。
+# 已有配置时不重复添加规则。注意：mc ilm rule ls 在无规则时退出码仍为 0
+# （输出空表），不能用退出码判断，需检查输出中是否含规则条目（带天数）。
 ensure_expiration_rule() {
     bucket="$1"
     days="$2"
-    if ! mc ilm rule ls "$MINIO_ALIAS/$bucket" >/dev/null 2>&1; then
+    if ! mc ilm rule ls "$MINIO_ALIAS/$bucket" 2>/dev/null | grep -q "expiry"; then
         mc ilm rule add --expire-days "$days" "$MINIO_ALIAS/$bucket" >/dev/null
     fi
 }

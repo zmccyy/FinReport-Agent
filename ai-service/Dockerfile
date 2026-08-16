@@ -14,10 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件并安装
+# 复制依赖文件并安装。
+# 不做静默降级：prod 依赖装失败应让构建失败（fail loud），
+# 否则镜像看似构建成功、运行时因缺 paddle/torch 而 import 崩溃。
 COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[prod]" 2>/dev/null || \
-    pip install --no-cache-dir fastapi uvicorn[standard]
+RUN pip install --no-cache-dir -e ".[prod]"
 
 # 复制应用代码
 COPY app/ ./app/

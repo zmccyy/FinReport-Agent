@@ -14,8 +14,8 @@ Usage
            --mock-llm \\
            --output docs/eval/m2-f1-sample.md
 
-2. Real 7B inference (requires GPU + 4-bit model already loaded in
-   ``ai-service`` ModelHub; not part of CI)::
+2. Real inference via DeepSeek API (requires ``LLM_API_KEY`` configured in
+   ``ai-service``; not part of CI)::
 
        python scripts/eval_m2_f1.py \\
            --pdf data/sample_reports/600519_贵州茅台_2025年年度报告.pdf \\
@@ -231,9 +231,16 @@ def _extract_with_real_llm(
         extract_resp = requests.post(
             f"{ai_service_url}/internal/models/generate",
             json={
-                "prompt": f"Extract {st_type} from document {document.get('source', '')}",
+                # DeepSeek json_mode 协议要求 prompt 含 "json" 字样，否则 400。
+                "prompt": (
+                    f"Extract {st_type} from document {document.get('source', '')}. "
+                    "Reply with a json object: {\"statements\": {\""
+                    f"{st_type}\": [{{\"item\": str, \"value\": number, "
+                    "\"unit\": str, \"period\": str}}]}}"
+                ),
                 "max_new_tokens": 2048,
                 "temperature": 0.0,
+                "json_mode": True,
             },
             timeout=120,
         )

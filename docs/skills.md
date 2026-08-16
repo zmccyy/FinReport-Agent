@@ -121,7 +121,7 @@ web-artifacts-builder
 
 - 业务模块不得直接 import `transformers` 或 `vllm`。
 - 模型调用统一经 `ModelHub.generate()` 或 `ModelHub.embed()`。
-- 遵循 RTX 4050 Mobile 6GB VRAM、4-bit 量化、QLoRA 和 Redis model lock 约束。
+- 遵循 API 成本与限流约束（2026-08-16 变更）：LLM 推理走 DeepSeek API，本地不做模型训练；仅保留 bge-small-zh CPU embedding。
 - 外部模型 API 只能通过 ModelHub 的适配层接入，不能从 Controller、Extractor、Reasoner 或 Agent 直接调用。
 
 ### 5.3 数据和基础设施
@@ -137,22 +137,22 @@ web-artifacts-builder
 - 修改应保持小步、可验证，并同步更新对应的 progress、API 或决策文档。
 - 不允许 skill 覆盖项目的版本锁定、分支策略、日志规范、错误处理和 Definition of Done。
 
-## 6. 当前仓库状态（2026-07-24）
+## 6. 当前仓库状态（2026-08-16）
 
 | 里程碑 | 当前状态 | 依据 |
 |---|---|---|
 | M1 | 基础设施与骨架已完成 | `docs/progress/m1.md` |
 | M2 | 解析与抽取闭环已完成 | `docs/progress/m2.md` |
 | M3 | 已完成（M3.01–M3.10 全部交付，SLA 端到端测试通过） | `docs/progress/m3.md`、`b4ddf24` |
-| M4 | 未开始 | `docs/progress/m4.md` |
-| M5 | 未开始 | `docs/progress/m5.md` |
+| M4 | 方向变更：API 化重构 + 全链路去 mock（原微调任务作废） | `docs/progress/m4.md`、决策记录 2026-08-16 |
+| M5 | 未开始（将包含自研轻量 RAG） | `docs/progress/m5.md` |
 | M6 | 未开始 | `docs/progress/m6.md` |
 
-当前工作重点是 M4 模型微调：T1 抽取模型 QLoRA、T2 embedding LoRA、T3 LayoutLM 微调，以及配套的评估脚本与 model_registry 表维护。
+当前工作重点是 M4 API 化重构：DeepSeekBackend 接入、数据通路补全（parse 产物落 MinIO、L3 只读 MySQL）、extract/check/report 去 mock，以及本地 GPU 栈移除。
 
 ## 7. 发现的文档/配置风险
 
-- `ai-service/pyproject.toml` 已将 `torch` 收紧为 `~=2.3.0`（对齐 spec §1 锁定的 2.3.x）；GPU 部署前仍需在目标机器上验证 CUDA 12.1 wheel 可装、`bitsandbytes` 0.43+ 与 torch 2.3.x 兼容。
+- `ai-service/pyproject.toml` 的 GPU 依赖（torch CUDA / bitsandbytes）将随 M4.08–M4.09 移除，切换 CPU-only wheel 与 sentence-transformers。
 - `transformers` 可以作为 ModelHub 的内部依赖，但业务代码边界必须继续由本文件和 `AGENTS.md` 约束。
 - `AGENTS.md`、`CLAUDE.md`、README 和实现计划的状态描述已随里程碑变更同步至「M3 已完成、M4 待启动」；后续里程碑切换时需再次同步。
 

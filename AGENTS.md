@@ -13,9 +13,9 @@
 - 项目名称：FinReport Agent — A 股上市公司财报深度解析 Agent
 - 核心能力：PDF 财报 → 结构化科目 → 勾稽核对 → 异常检测 → NLG 报告 → ReAct 问答
 - 架构：5 层（L1 Vue3 / L2 SpringBoot / L3 FastAPI / L4 Models / L5 Data）
-- 关键约束：RTX 4050 Mobile 6GB VRAM，必须使用 4-bit 量化 + QLoRA
+- 关键约束（2026-08-16 变更）：LLM 推理走 DeepSeek API，本地不做模型训练；本地仅保留 bge-small-zh CPU embedding
 - 总周期：12 周 / 6 里程碑 / 76 任务
-- 当前状态：M1、M2、M3 已完成；M4 模型微调待启动。实时进度以 docs/progress/ 和 docs/decisions/ 为准。
+- 当前状态：M1、M2、M3 已完成；M4 方向变更为 API 化重构 + 全链路去 mock（原微调任务作废，见 docs/decisions/2026-08-16-m4-pivot-deepseek-api-rag.md）。实时进度以 docs/progress/ 和 docs/decisions/ 为准。
 
 ---
 
@@ -26,7 +26,8 @@
 | Java | 21 | LTS |
 | SpringBoot | 3.2.x | WebFlux + Security |
 | Python | 3.11 | AI 服务 |
-| PyTorch | 2.3.x + CUDA 12.1 | 必须 4-bit 量化 |
+| DeepSeek API | deepseek-chat | LLM 推理（OpenAI 兼容，httpx 直连） |
+| sentence-transformers | >=2.7（CPU） | bge-small-zh-v1.5 embedding（512 维） |
 | Vue | 3.4 | Composition API |
 | Element Plus | 2.7 | UI 库 |
 | MySQL | 8.0 | 主数据库 |
@@ -47,8 +48,8 @@
     ├── ai-service/            # L3 Python/FastAPI
     ├── frontend/              # L1 Vue3
     ├── data/                  # 原始数据 + 训练数据 + 基准数据
-    ├── models/                # LoRA adapter 本地缓存（不入库）
-    ├── scripts/               # 一次性脚本：初始化、训练、评估
+    ├── models/                # 本地模型缓存（bge-small-zh embedding，不入库）
+    ├── scripts/               # 一次性脚本：初始化、评估
     ├── deploy/                # docker-compose、Dockerfile、配置
     └── AGENTS.md              # 本文件
 
@@ -66,7 +67,7 @@
 | M8 勾稽与异常 | ai-service/app/modules/reasoner/ |
 | M9 Agent 编排 | ai-service/app/modules/agent/ |
 | M10 报告生成 | ai-service/app/modules/generator/ |
-| M11 模型与训练 | ai-service/app/modules/modelhub/ |
+| M11 模型接入（原"模型与训练"） | ai-service/app/modules/modelhub/ |
 
 ---
 
@@ -210,7 +211,7 @@
 - 勾稽规则（通过 + 失败 + 边界）
 - MQ 死信流转
 - SSE 断线重连
-- 模型降级（mock 7B 超时 → 切 API）
+- API 失败降级（mock 429/超时 → 重试 → LLMReviewer/ReportGenerator 兜底）
 - 限流触发
 
 ---
@@ -242,19 +243,14 @@
     # 预置 50 份年报到知识库
     python scripts/build_kb.py --count 50
 
-### 7.3 训练命令
+### 7.3 模型与 API（2026-08-16 起，训练已取消）
 
-    # T1 抽取模型
-    python scripts/finreport-train train-extractor --version v1.0.0
+    # 下载本地 embedding 模型（bge-small-zh-v1.5，~95MB）
+    python scripts/download_models.py
 
-    # T2 embedding
-    python scripts/finreport-train train-embedder --version v1.0.0
-
-    # T3 LayoutLM
-    python scripts/finreport-train train-layoutlm --version v1.0.0
-
-    # 评估
-    python scripts/finreport-train eval-extractor --version v1.0.0
+    # LLM 推理走 DeepSeek API：deploy/.env 配置 LLM_API_KEY 后启动开发栈即可
+    # 抽取质量评估（真实 API 输出）
+    python scripts/eval_m2_f1.py
 
 ### 7.4 测试命令
 
@@ -285,28 +281,22 @@
 
 ## 8. 关键技术约束
 
-### 8.1 GPU 显存（6GB VRAM 硬约束）
+### 8.1 API 成本与限流约束（2026-08-16 起，替代原 GPU 显存约束）
 
-- 推理时：单进程只能装 1 个 7B(4bit ~5GB) 或 1 个 1.5B + 1 个 small
-- 训练时：必须用 gradient_checkpointing + paged_adamw_8bit + 4-bit 量化
-- 多 worker：通过 Redis 分布式锁 fin:lock:model:{modelName} 防冲突
-- MQ 消费者：prefetch_count=1
-
-显存预算参考：
-
-| 模型 | 推理 | 训练 |
-|---|---|---|
-| Qwen2.5-7B 4-bit | ~5 GB | 不训练 |
-| Qwen2.5-1.5B 4-bit QLoRA | ~1 GB | ~5.2 GB |
-| bge-small-zh LoRA | ~0.2 GB | ~3.8 GB |
-| LayoutLMv3 fp16 | ~0.3 GB | ~4.5 GB |
+- LLM 推理统一走 DeepSeek API（deepseek-chat，OpenAI 兼容），本地不做模型训练
+- API Key 仅通过环境变量 LLM_API_KEY 注入（deploy/.env），不入库不入 git
+- 重试策略：429/5xx/网络错误指数退避（1s, 2s）重试 2 次；4xx 不重试
+- 抽取/复核场景开启 response_format=json_object，配合 validator temp=0.1 重试
+- 单任务约 8-12 次 API 调用（三表+复核+报告），估算单份年报 ¥0.5-1
+- 本地 embedding（bge-small-zh CPU）与 L3 只读 MySQL 无显存/配额压力
+- MQ 消费者：prefetch_count=1（保留，防 API 并发过载）
 
 ### 8.2 模型调用
 
-- 业务代码禁止直接 import transformers / vllm
+- 业务代码禁止直接 import transformers / vllm（BgeSmallEmbedder 是唯一例外入口，属 ModelHub 内部）
 - 所有模型调用必须走 ModelHub.generate() 或 ModelHub.embed()
-- ModelHub 内部按 scene 路由：EXTRACT / REASON / EMBED / LAYOUT
-- 失败降级链：本地 7B → API 72B（DeepSeek/Qwen）
+- ModelHub 内部按 scene 路由：EXTRACT / REASON → DeepSeekBackend（API）；EMBED → BgeSmallEmbedder（CPU）
+- 失败降级链：API 重试 2 次 → LLMReviewer 降级保留规则结果 / ReportGenerator 降级模板报告
 
 ### 8.3 消息队列
 
@@ -603,5 +593,5 @@ A: 检查 EXTRACT 链路是否只用 1.5B、REASON 链路是否只用 7B；调�
 - 修改本文件需提 PR + review
 - 版本变更记录在文件头 版本 字段
 
-版本：v1.2
-最后更新：2026-07-24
+版本：v1.3
+最后更新：2026-08-16
