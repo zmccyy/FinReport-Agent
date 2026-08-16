@@ -57,6 +57,9 @@ class TaskConsumer:
         self.stop_event = Event()
         self.thread: Thread | None = None
         self.connection: Any | None = None
+        # 消费线程内复用的事件循环——避免每条消息 asyncio.run() 反复
+        # 创建/销毁 loop（含 to_thread 线程池无法跨消息复用）。
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def configure_channel(self, channel: Any) -> None:
         """Apply the fixed single-message prefetch policy.
@@ -91,6 +94,8 @@ class TaskConsumer:
         )
         while not self.stop_event.is_set():
             try:
+                if self._loop is None:
+                    self._loop = asyncio.new_event_loop()
                 self.connection = pika.BlockingConnection(parameters)
                 channel = self.connection.channel()
                 self.configure_channel(channel)
@@ -111,6 +116,10 @@ class TaskConsumer:
                 if self.connection is not None and self.connection.is_open:
                     self.connection.close()
                 self.connection = None
+
+        if self._loop is not None:
+            self._loop.close()
+            self._loop = None
 
     def on_message(
         self, channel: Any, method: Any, properties: Any, body: bytes
@@ -142,7 +151,12 @@ class TaskConsumer:
             return
 
         try:
-            result = asyncio.run(handler(task))
+            # 复用消费线程的事件循环（on_message 与 _consume 同线程）。
+            loop = self._loop
+            if loop is None or loop.is_closed():
+                loop = asyncio.new_event_loop()
+                self._loop = loop
+            result = loop.run_until_complete(handler(task))
         except Exception as error:
             LOGGER.exception("Task handler failed routingKey=%s", method.routing_key)
             try:
