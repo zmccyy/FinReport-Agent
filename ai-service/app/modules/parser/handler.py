@@ -1,7 +1,8 @@
-"""M2 parse MQ handler: MinIO fetch + DocumentParser."""
+"""M2/M4.03 parse MQ handler: MinIO fetch + DocumentParser + 产物落 MinIO."""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from app.core.config import Settings
@@ -16,6 +17,21 @@ LOGGER = get_logger(__name__)
 
 _parser: DocumentParser | None = None
 _object_store: ObjectStore | None = None
+
+# M4.03 parse 中间产物对象 key 前缀（finreport-artifacts 桶）。
+PARSED_KEY_PREFIX = "parsed/"
+
+
+def parsed_object_key(task_id: str) -> str:
+    """Build the MinIO key holding a task's parse payload.
+
+    Args:
+        task_id: Task identifier.
+
+    Returns:
+        Key of the form ``parsed/{taskId}.json`` (decision record #6).
+    """
+    return f"{PARSED_KEY_PREFIX}{task_id}.json"
 
 
 def configure_handler(
@@ -43,9 +59,10 @@ def _resolve_parser() -> DocumentParser:
     """Return the configured parser or build the production default."""
     if _parser is not None:
         return _parser
+    settings = Settings()
     return create_document_parser(
-        Settings(),
-        enable_table_recognition=False,
+        settings,
+        enable_table_recognition=settings.parser_enable_table_recognition,
         enable_ocr=False,
     )
 
@@ -75,7 +92,11 @@ def _serialize_document(document: Any) -> dict[str, Any]:
 
 
 async def handle(message: TaskMessage) -> dict[str, Any]:
-    """Fetch a PDF from MinIO and parse it into a Document result.
+    """Fetch a PDF from MinIO, parse it, and persist the payload to MinIO.
+
+    M4.03: parse 产物（完整 Document schema JSON）写入
+    ``s3://finreport-artifacts/parsed/{taskId}.json``，供 M4.04 extract
+    handler 拉取（L2 payload 不携带上游 result，走对象存储中转）。
 
     Args:
         message: Validated parse task message containing ``pdfObjectKey``.
@@ -84,7 +105,7 @@ async def handle(message: TaskMessage) -> dict[str, Any]:
         Parsed-document metadata plus the full Document payload under ``extra``.
 
     Raises:
-        AiException: When the payload is invalid or MinIO fetch fails.
+        AiException: When the payload is invalid, MinIO fetch/put fails.
     """
     pdf_object_key = message.payload.get("pdfObjectKey")
     if not pdf_object_key:
@@ -97,6 +118,24 @@ async def handle(message: TaskMessage) -> dict[str, Any]:
         object_key,
     )
 
-    pdf_bytes = _resolve_object_store().fetch_bytes(object_key)
+    store = _resolve_object_store()
+    pdf_bytes = store.fetch_bytes(object_key)
     document = _resolve_parser().parse_bytes(pdf_bytes, source=object_key)
+
+    # M4.03 产物落 MinIO：失败即抛错（extract 无法进行，任务应重试）。
+    artifact_key = parsed_object_key(message.task_id)
+    store.put_bytes(
+        json.dumps(document.model_dump(mode="json"), ensure_ascii=False).encode(
+            "utf-8"
+        ),
+        artifact_key,
+        content_type="application/json",
+    )
+    LOGGER.info(
+        "[handle] parse 产物已上传 taskId=%s key=%s pages=%d tables=%d",
+        message.task_id,
+        artifact_key,
+        document.page_count,
+        document.total_tables,
+    )
     return _serialize_document(document)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 from typing import Any, Protocol
 from urllib.parse import urlparse
 
@@ -27,6 +28,27 @@ class ObjectStore(Protocol):
 
         Raises:
             AiException: When the object cannot be fetched.
+        """
+        ...
+
+    def put_bytes(
+        self,
+        data: bytes,
+        object_key: str,
+        bucket: str | None = None,
+        content_type: str = "application/octet-stream",
+    ) -> None:
+        """Upload one object from raw bytes (M4.03 parse 产物落 MinIO).
+
+        Args:
+            data: Raw bytes to upload.
+            object_key: Target S3 object key within the bucket.
+            bucket: Optional bucket override.
+            content_type: Object content type (default application/json
+                callers should pass explicitly).
+
+        Raises:
+            AiException: When the upload fails.
         """
         ...
 
@@ -83,6 +105,51 @@ class MinioObjectClient:
                 f"MinIO object is empty bucket={target_bucket} key={object_key}"
             )
         return data
+
+    def put_bytes(
+        self,
+        data: bytes,
+        object_key: str,
+        bucket: str | None = None,
+        content_type: str = "application/octet-stream",
+    ) -> None:
+        """Upload raw bytes to MinIO (M4.03 parse 产物落 MinIO).
+
+        Args:
+            data: Payload bytes (e.g. serialized parse JSON).
+            object_key: Target key, e.g. ``parsed/{taskId}.json``.
+            bucket: Bucket override; defaults to ``finreport-artifacts``.
+            content_type: Object content type.
+
+        Raises:
+            AiException: When the upload fails or payload is empty.
+        """
+        if not data:
+            raise AiException(
+                f"Refusing to upload empty object key={object_key}"
+            )
+        target_bucket = bucket or self.settings.minio_artifact_bucket
+        LOGGER.debug(
+            "[put_bytes] bucket=%s objectKey=%s size=%d",
+            target_bucket,
+            object_key,
+            len(data),
+        )
+        try:
+            client = self._ensure_client()
+            client.put_object(
+                target_bucket,
+                object_key,
+                io.BytesIO(data),
+                length=len(data),
+                content_type=content_type,
+            )
+        except AiException:
+            raise
+        except Exception as error:
+            raise AiException(
+                f"MinIO put failed bucket={target_bucket} key={object_key}: {error}"
+            ) from error
 
     def _ensure_client(self) -> Any:
         """Lazily build the MinIO SDK client on first use.

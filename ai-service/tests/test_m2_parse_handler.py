@@ -19,18 +19,21 @@ from app.schemas.task import TaskMessage
 
 
 class FakeObjectStore:
-    """In-memory object store used to mock MinIO fetches."""
+    """In-memory object store used to mock MinIO fetches and puts."""
 
     def __init__(
         self,
         *,
         data: bytes | None = None,
         error: Exception | None = None,
+        put_error: Exception | None = None,
         empty: bool = False,
     ) -> None:
         self.data = b"" if empty else (data or b"%PDF-mock")
         self.error = error
+        self.put_error = put_error
         self.requests: list[tuple[str, str | None]] = []
+        self.puts: list[tuple[bytes, str, str | None, str]] = []
 
     def fetch_bytes(self, object_key: str, bucket: str | None = None) -> bytes:
         """Return configured bytes or raise the configured error."""
@@ -38,6 +41,18 @@ class FakeObjectStore:
         if self.error is not None:
             raise self.error
         return self.data
+
+    def put_bytes(
+        self,
+        data: bytes,
+        object_key: str,
+        bucket: str | None = None,
+        content_type: str = "application/octet-stream",
+    ) -> None:
+        """Record the upload or raise the configured error (M4.03)."""
+        if self.put_error is not None:
+            raise self.put_error
+        self.puts.append((data, object_key, bucket, content_type))
 
 
 class FakeChannel:
@@ -144,6 +159,45 @@ def test_handle_fetches_pdf_and_returns_real_counts(text_pdf_bytes: bytes) -> No
     assert result["document"]["extra"]["page_count"] == 2
 
 
+def test_parsed_object_key_format() -> None:
+    """M4.03: parse artifacts use the parsed/{taskId}.json key convention."""
+    from app.modules.parser.handler import parsed_object_key
+
+    assert parsed_object_key("task-abc") == "parsed/task-abc.json"
+
+
+def test_handle_uploads_parse_artifact_to_minio(text_pdf_bytes: bytes) -> None:
+    """M4.03: the parsed Document payload must be persisted to MinIO."""
+    document = Document(
+        source="uploads/1/demo.pdf",
+        page_count=1,
+        pages=[Page(page_index=0, width=595, height=842)],
+    )
+    store = FakeObjectStore(data=text_pdf_bytes)
+    configure_handler(parser=FakeParser(document), object_store=store)
+
+    asyncio.run(handle(build_task_message(task_id="task-artifact")))
+
+    assert len(store.puts) == 1
+    payload_bytes, key, bucket, content_type = store.puts[0]
+    assert key == "parsed/task-artifact.json"
+    assert bucket is None  # 默认 finreport-artifacts
+    assert content_type == "application/json"
+    parsed = json.loads(payload_bytes.decode("utf-8"))
+    assert parsed["source"] == "uploads/1/demo.pdf"
+    assert parsed["page_count"] == 1
+
+
+def test_handle_raises_when_artifact_put_fails(text_pdf_bytes: bytes) -> None:
+    """M4.03: artifact upload failure must fail the step (retry via DLQ)."""
+    document = Document(source="x", page_count=1, pages=[])
+    store = FakeObjectStore(data=text_pdf_bytes, put_error=AiException("put failed"))
+    configure_handler(parser=FakeParser(document), object_store=store)
+
+    with pytest.raises(AiException, match="put failed"):
+        asyncio.run(handle(build_task_message()))
+
+
 def test_handle_raises_when_pdf_object_key_missing() -> None:
     """Missing pdfObjectKey must fail fast before touching MinIO."""
     with pytest.raises(AiException, match="Missing pdfObjectKey"):
@@ -173,6 +227,50 @@ def test_minio_client_wraps_transport_errors() -> None:
 
     with pytest.raises(AiException, match="MinIO fetch failed"):
         client.fetch_bytes("uploads/1/report.pdf")
+
+
+def test_minio_client_put_bytes_uploads_to_artifact_bucket() -> None:
+    """M4.03: put_bytes uploads via the SDK to the artifact bucket by default."""
+
+    class RecordingClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, int, str]] = []
+
+        def put_object(
+            self, bucket: str, key: str, stream: Any, length: int, content_type: str
+        ) -> None:
+            data = stream.read()
+            self.calls.append((bucket, key, len(data), content_type))
+
+    sdk = RecordingClient()
+    client = MinioObjectClient(Settings(), client=sdk)
+
+    client.put_bytes(
+        b'{"page_count": 1}', "parsed/t1.json", content_type="application/json"
+    )
+
+    assert sdk.calls == [
+        ("finreport-artifacts", "parsed/t1.json", 17, "application/json")
+    ]
+
+
+def test_minio_client_put_bytes_wraps_errors_and_rejects_empty() -> None:
+    """M4.03: put failures convert to AiException; empty payloads rejected."""
+
+    class BrokenClient:
+        def put_object(
+            self, bucket: str, key: str, stream: Any, length: int, content_type: str
+        ) -> None:
+            del bucket, key, stream, length, content_type
+            raise OSError("quota exceeded")
+
+    client = MinioObjectClient(Settings(), client=BrokenClient())
+
+    with pytest.raises(AiException, match="MinIO put failed"):
+        client.put_bytes(b"x", "parsed/t2.json")
+
+    with pytest.raises(AiException, match="empty object"):
+        client.put_bytes(b"", "parsed/t3.json")
 
 
 def test_minio_client_rejects_empty_object() -> None:

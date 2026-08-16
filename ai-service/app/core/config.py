@@ -22,6 +22,17 @@ class Settings(BaseSettings):
     minio_access_key: str = "minioadmin"
     minio_secret_key: str = "minioadmin"
     minio_upload_bucket: str = "finreport-uploads"
+    # M4.03 parse 中间产物桶（parsed/{taskId}.json，供 extract 步骤消费）。
+    minio_artifact_bucket: str = "finreport-artifacts"
+    # M4.03 表格识别开关：开启后 parse 挂载 PP-Structure TableRecognizer，
+    # 扫描件 OCR 兜底仍保持关闭（SLA 退路，spec §12.1 PARSE < 90s）。
+    parser_enable_table_recognition: bool = True
+    # M4.05 L3 只读 MySQL（compose MYSQL_* 预留兑现；仅 SELECT，写入归 L2）。
+    mysql_host: str = "localhost"
+    mysql_port: int = 3306
+    mysql_user: str = "finreport"
+    mysql_password: str = "finreport"
+    mysql_database: str = "finreport"
     # M2.04 ModelHub — local model paths (relative to repo root or absolute).
     model_7b_path: str = "models/Qwen2.5-7B-Instruct-GPTQ-Int4"
     model_15b_path: str = "models/Qwen2.5-1.5B-Instruct"

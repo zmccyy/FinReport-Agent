@@ -69,11 +69,23 @@ class _InlineObjectStore:
 
     def __init__(self, data: bytes) -> None:
         self.data = data
+        self.puts: list[str] = []
 
     def fetch_bytes(self, object_key: str, bucket: str | None = None) -> bytes:
         """Return the configured PDF bytes."""
         del object_key, bucket
         return self.data
+
+    def put_bytes(
+        self,
+        data: bytes,
+        object_key: str,
+        bucket: str | None = None,
+        content_type: str = "application/octet-stream",
+    ) -> None:
+        """Record artifact uploads (M4.03 parse 产物落 MinIO)."""
+        del data, bucket, content_type
+        self.puts.append(object_key)
 
 
 class _InlineParser(DocumentParser):
