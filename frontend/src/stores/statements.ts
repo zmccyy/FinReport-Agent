@@ -63,8 +63,10 @@ export const useStatementsStore = defineStore('statements', () => {
 
   const hasEdited = computed(() => Object.keys(edited.value.values).length > 0)
 
-  /** 加载详情 + 三表（并发） */
+  /** 加载详情 + 三表（并发）。请求序号防竞态：快速切换报告时丢弃过期响应。 */
+  let loadSeq = 0
   async function load(reportId: number): Promise<void> {
+    const seq = ++loadSeq
     loading.value = true
     error.value = null
     try {
@@ -72,16 +74,18 @@ export const useStatementsStore = defineStore('statements', () => {
         getReportDetail(reportId),
         getStatements(reportId),
       ])
+      if (seq !== loadSeq) return
       report.value = detail
       statements.value = resp
       edited.value = { values: {} }
     } catch (err) {
+      if (seq !== loadSeq) return
       error.value = err instanceof ApiError ? err.message : '加载失败，请稍后重试'
       report.value = null
       statements.value = structuredClone(EMPTY_STATEMENTS)
       edited.value = { values: {} }
     } finally {
-      loading.value = false
+      if (seq === loadSeq) loading.value = false
     }
   }
 

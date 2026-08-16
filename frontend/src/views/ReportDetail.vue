@@ -125,6 +125,15 @@ onMounted(() => {
   load(reportId.value)
 })
 
+// 路由复用同组件（/reports/1 → /reports/2）时 onMounted 不会再触发，
+// 需 watch 参数变化重新加载，否则一直显示旧报告。
+watch(
+  () => reportId.value,
+  (id) => {
+    if (id != null) load(id)
+  }
+)
+
 // 当详情包含 taskId 时同步状态到 reports store（用于列表页状态一致性）
 watch(
   () => detail.value,

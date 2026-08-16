@@ -28,9 +28,11 @@ export interface TrackedReport {
 const STORAGE_PREFIX = 'fin:tracked_reports:'
 
 function storageKey(): string {
-  // 以 access token 前 8 位命名空间隔离用户（登出后 token 被清，自然切换）
-  const token = getAccessToken()
-  const scope = token ? token.slice(0, 8) : 'anon'
+  // 以 uid 命名空间隔离用户。不能用 token 前缀：JWT header 固定，
+  // 所有用户 token 前 8 字符相同（"eyJhbGci"），会导致同浏览器下
+  // 不同用户共享同一份上传记录。
+  const uid = localStorage.getItem('fin:uid')
+  const scope = uid ?? (getAccessToken() ? 'pending' : 'anon')
   return STORAGE_PREFIX + scope
 }
 

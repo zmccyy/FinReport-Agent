@@ -71,7 +71,9 @@ async function submit(): Promise<void> {
       await auth.register(form.username, form.password, form.email || undefined)
       ElMessage.success('注册成功，已自动登录')
     }
-    const redirect = (route.query.redirect as string) || '/reports'
+    // 仅允许站内相对路径，防止开放重定向（//evil.com、https://evil.com）
+    const raw = (route.query.redirect as string) || '/reports'
+    const redirect = raw.startsWith('/') && !raw.startsWith('//') ? raw : '/reports'
     router.push(redirect)
   } catch (err) {
     errorMessage.value =

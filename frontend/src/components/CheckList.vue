@@ -47,19 +47,26 @@ function formatNumber(value: number | null): string {
   return value.toLocaleString('zh-CN', { maximumFractionDigits: 4 })
 }
 
+// 请求序号防竞态：快速切换 reportId 时丢弃过期响应，避免旧数据覆盖新数据
+let loadSeq = 0
+
 async function load(id: number): Promise<void> {
+  const seq = ++loadSeq
   loading.value = true
   error.value = null
   try {
-    checks.value = await getChecks(id)
+    const data = await getChecks(id)
+    if (seq !== loadSeq) return
+    checks.value = data
   } catch (err) {
+    if (seq !== loadSeq) return
     error.value = err instanceof ApiError ? err.message : '加载勾稽结果失败，请稍后重试'
     if (err instanceof ApiError && err.code !== 'REPORT_NOT_FOUND') {
       ElMessage.error(error.value)
     }
     checks.value = []
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 

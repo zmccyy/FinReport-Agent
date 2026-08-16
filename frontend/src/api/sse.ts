@@ -236,6 +236,9 @@ export function connectTaskStream(
   }
 
   function dispatch(evt: { event: string; data: string; id?: string }): void {
+    // 收到真实事件说明链路存活，重置退避计数——否则长任务累计断线
+    // 达到 maxRetries 后永久放弃重连。
+    attempts = 0
     if (evt.id) lastEventId = evt.id
     let payload: unknown
     try {

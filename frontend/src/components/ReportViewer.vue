@@ -86,17 +86,23 @@ function chartIcon(type: string): string {
   }
 }
 
+// 请求序号防竞态：快速切换 reportId 时丢弃过期响应，避免旧数据覆盖新数据
+let loadSeq = 0
+
 async function load(id: number): Promise<void> {
+  const seq = ++loadSeq
   loading.value = true
   error.value = null
   markdownText.value = ''
   try {
     const list = await getArtifacts(id)
+    if (seq !== loadSeq) return
     artifacts.value = groupArtifacts(list)
     if (artifacts.value.markdown?.status === 'GENERATED' && artifacts.value.markdown.downloadUrl) {
       markdownText.value = await getMarkdownText(artifacts.value.markdown.downloadUrl)
     }
   } catch (err) {
+    if (seq !== loadSeq) return
     error.value = err instanceof ApiError ? err.message : '加载报告产物失败，请稍后重试'
     if (err instanceof ApiError && err.code !== 'REPORT_NOT_FOUND') {
       ElMessage.error(error.value)
@@ -104,7 +110,7 @@ async function load(id: number): Promise<void> {
     artifacts.value = { pdf: null, markdown: null, charts: [] }
     markdownText.value = ''
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 

@@ -45,6 +45,11 @@ export const useAuthStore = defineStore('auth', () => {
   /** 拉取当前用户信息。 */
   async function fetchCurrentUser(): Promise<void> {
     user.value = await authApi.getCurrentUser()
+    // 持久化 uid：reports store 的 localStorage 命名空间依赖它
+    //（JWT 前缀所有用户相同，不能用作隔离键）。
+    if (user.value) {
+      localStorage.setItem('fin:uid', String(user.value.id))
+    }
   }
 
   /**
@@ -71,6 +76,7 @@ export const useAuthStore = defineStore('auth', () => {
       }
     }
     clearTokens()
+    localStorage.removeItem('fin:uid')
     syncAuthState()
     useReportsStore().reload()
     user.value = null
