@@ -457,6 +457,14 @@ components:
           nullable: true
           minimum: 1
           maximum: 600
+        system_prompt:
+          type: string
+          nullable: true
+          description: 可选 system 消息（API 后端生效，M4.02）
+        json_mode:
+          type: boolean
+          default: false
+          description: 请求 response_format=json_object（DeepSeek 协议要求 prompt 含 "json" 字样，M4.02）
     GenerateResponse:
       type: object
       properties:

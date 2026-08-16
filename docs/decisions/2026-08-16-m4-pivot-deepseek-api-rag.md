@@ -32,6 +32,18 @@
 - [x] Phase 1 探索：确认 extract/check/report 三处 mock + 数据通路断链（L2 buildPayload 不含上游 result）
 - [x] 确认 L2 写入侧契约：StatementWriter（M2.09）/ CheckResultWriter（M3.04）/ ReportArtifactWriter（M3.08）
 - [x] v2 计划落档并批准
+- [x] M4.01 架构变更落档（决策记录 + spec 第 4 章重写 + AGENTS/skills/progress 同步）
+- [x] M4.02 DeepSeekBackend + ModelHub API 路由改造（13 例 mock httpx 单测；提交 15425e6）
+- [x] 全模块代码审查 + bug 修复批次（15425e6..5c057f9，5 个修复提交）：
+  - L3：MQ 消费者复用事件循环；幂等键对齐 L2 契约（taskId:step 小写）
+  - L2：convertAndSend 阻塞 IO 移交 boundedElastic；markDispatchFailed 包裹事务；
+    SseEmitterPool.complete() 移除已终结 sink（内存泄漏）；ProgressConsumer dedup
+    命中改 ack（原误 nack 进 DLQ）；PDF 查重移除全局 md5 回退（跨用户命中漏洞）；
+    三表查询合并单次批量（spec §12.2）
+  - L1：四处组件请求序号防竞态；SSE 重连收到有效事件即重置退避；localStorage
+    命名空间改 uid 隔离；登录 redirect 防开放重定向；ReportDetail watch 路由参数
+- [x] 全栈回归：Java 338/338、Python 510 passed、前端 lint + type-check 通过
+- [x] 推送 origin/main（a6d77db..5c057f9）
 
 ## 发现的风险
 
@@ -39,7 +51,28 @@
 - 年报合并/母公司同名表格筛选靠启发式（取行数最多），M4.10 真实年报验证
 - DeepSeek 429 限流（重试 2 次指数退避兜底）
 - AnomalyDetector 单期数据仅 logic_conflict 类异常生效（多期对比留 M5）
+- SSE 语义变更（complete 后进程内 sink 即删）：晚到/重连客户端的终态事件
+  完全依赖 RedisSseEventStore + TaskController 终态判断，Redis 不可用时重连
+  客户端将收不到终态信号（前端有心跳/超时兜底，可接受）
+- 本地 Windows 开发环境两个已知干扰（CI 不受影响）：black 在 anaconda 环境
+  挂起（用 ruff + CI 兜底）；JaCoCo 残留插桩类要求 `mvnw clean test`
 
 ## 下一步行动项
 
-按 v2 计划 §5 顺序执行 M4.02 → M4.10，每任务一个 commit。
+按 v2 计划顺序执行，每任务一个 commit：
+
+1. **M4.03 数据通路-解析侧**：minio `put_bytes` 客户端 + parse 产物落
+   MinIO（`parsed/{taskId}.json`）+ 表格识别开启
+2. **M4.04 extractor 去 mock**：MinIO 拉 parse 产物 + 合并/母公司表格筛选 +
+   三表真实抽取（DeepSeek json_mode）
+3. **M4.05 check 去 mock**：L3 只读 MySQL 客户端 + RuleEngine /
+   AnomalyDetector / LLMReviewer 接入（M3.04 契约）
+4. **M4.06 generator 归位**：新增 report handler + 路由从 reasoner 切换
+   （报告 + 图表 + PDF，M3.08 契约）
+5. **M4.08 GPU 栈移除**：vram_scheduler / TransformersBackend / torch CUDA
+   依赖 / 8 项本地模型配置 + 测试清理
+6. **M4.07 BgeSmallEmbedder 实装**：ModelHub.embed() 512 维归一化（M5 RAG 前置）
+7. **M4.09 部署调整**：Dockerfile CPU wheel + compose 注入 LLM_API_KEY +
+   download_models 精简
+8. **M4.10 注册与端到端**：model_registry 注册 deepseek-chat + bge-small-zh；
+   真实 PDF 全链路验证 + eval_m2_f1 复测（F1 ≥ 0.85）
