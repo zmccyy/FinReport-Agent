@@ -10,8 +10,7 @@
 5. ``LLMReviewer.review`` 复核 WARN/ERROR 规则（降级内建：API 失败保留规则结果）；
 6. 返回 ``CheckResult.to_dict()``（M3.04 契约，L2 CheckResultWriter 消费）。
 
-``report`` 步骤仍返回 mock payload —— M4.06 将新增 generator handler
-并切换路由（本模块只保留 check 分支）。
+``report`` 步骤已归位 ``app.modules.generator.handler``（M4.06 路由切换）。
 """
 
 from __future__ import annotations
@@ -120,24 +119,21 @@ def _prefer(rows: list[StatementRow], predicate: Any) -> list[StatementRow]:
 
 
 async def handle(message: TaskMessage) -> dict[str, Any]:
-    """按 step 分发：check 走真实勾稽链路，report 暂留 mock（M4.06 归位）。
+    """执行 CHECK 勾稽链路并返回 M3.04 契约 payload。
 
     Args:
-        message: Validated task message (``check`` / ``report``).
+        message: Validated check task message（step 必须为 ``check``）。
 
     Returns:
-        check → ``CheckResult.to_dict()``（M3.04 契约）；
-        report → mock payload。
+        ``CheckResult.to_dict()``。
 
     Raises:
-        ValueError: When the routing step is unknown.
+        ValueError: When the routing step is not ``check``.
         AiException: When the report data is missing or unreadable.
     """
-    if message.step == "check":
-        return await _handle_check(message)
-    if message.step == "report":
-        return {"operation": "report", "status": "mock-complete"}
-    raise ValueError(f"Unknown reasoner step: {message.step!r}, expected 'check' or 'report'")
+    if message.step != "check":
+        raise ValueError(f"Unknown reasoner step: {message.step!r}, expected 'check'")
+    return await _handle_check(message)
 
 
 async def _handle_check(message: TaskMessage) -> dict[str, Any]:

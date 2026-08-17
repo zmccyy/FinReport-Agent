@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from typing import Any
 
 import pytest
 
@@ -95,6 +96,12 @@ class FakeReader:
         """Record the request and return the configured comparison data."""
         self.year_ago_requests.append((company_code, current_period))
         return self.year_ago
+
+    def fetch_check_result(self, report_id: int) -> Any:
+        """Guard: the check handler must not read persisted check results."""
+        raise AssertionError(
+            f"check handler must not call fetch_check_result (reportId={report_id})"
+        )
 
 
 class FakeReviewer:
@@ -287,13 +294,9 @@ def test_handle_check_raises_when_no_statement_rows() -> None:
         asyncio.run(handle(build_message()))
 
 
-def test_handle_report_step_stays_mock_until_m406() -> None:
-    """report 步骤暂留 mock（M4.06 generator 归位）。"""
-    payload = asyncio.run(handle(build_message(step="report")))
-    assert payload == {"operation": "report", "status": "mock-complete"}
-
-
 def test_handle_rejects_unknown_step() -> None:
-    """未知 step 显式报错走 DLQ。"""
+    """未知 step（含已归位的 report）显式报错走 DLQ。"""
     with pytest.raises(ValueError, match="Unknown reasoner step"):
+        asyncio.run(handle(build_message(step="report")))
+    with pytest.raises(ValueError, match="expected 'check'"):
         asyncio.run(handle(build_message(step="reason")))

@@ -1,4 +1,4 @@
-"""M10 报告生成模块（spec §2.3 M10 + plan M3.05+）。
+"""M10 报告生成模块（spec §2.3 M10 + plan M3.05+ / M4.06）。
 
 子模块：
 
@@ -6,9 +6,11 @@
 * ``report_generator`` — 异步 ``ReportGenerator`` 类（NLG 入口）。
 * ``chart_renderer`` — ``ChartRenderer`` 类（3 张 PNG 图表服务端渲染）。
 * ``pdf_converter`` — ``PdfConverter`` 类（Markdown + 图表 → PDF）。
+* ``handler`` — M4.06 report MQ handler（只读 MySQL → 报告/图表/PDF）。
 """
 
 from app.modules.generator.chart_renderer import ChartRenderer
+from app.modules.generator.handler import handle
 from app.modules.generator.pdf_converter import PdfConverter
 from app.modules.generator.prompts import build_report_prompt
 from app.modules.generator.report_generator import ReportGenerator
@@ -18,4 +20,5 @@ __all__ = [
     "PdfConverter",
     "ReportGenerator",
     "build_report_prompt",
+    "handle",
 ]

@@ -7,6 +7,7 @@ from typing import Any, Awaitable, Callable
 from app.core.config import Settings
 from app.schemas.task import TaskMessage
 from app.modules.extractor.handler import handle as extract_handler
+from app.modules.generator.handler import handle as generator_handler
 from app.modules.parser.handler import handle as parse_handler
 from app.modules.reasoner.handler import handle as reason_handler
 from app.mq.producer import ProgressProducer
@@ -52,7 +53,7 @@ class TaskConsumer:
             "extract.is": extract_handler,
             "extract.cf": extract_handler,
             "check": reason_handler,
-            "report": reason_handler,
+            "report": generator_handler,
         }
         self.stop_event = Event()
         self.thread: Thread | None = None
@@ -73,9 +74,7 @@ class TaskConsumer:
         """Start the broker loop on a daemon thread when enabled."""
         if not self.settings.mq_consumer_enabled or self.thread is not None:
             return
-        self.thread = Thread(
-            target=self._consume, name="finreport-mq-consumer", daemon=True
-        )
+        self.thread = Thread(target=self._consume, name="finreport-mq-consumer", daemon=True)
         self.thread.start()
 
     def _consume(self) -> None:
@@ -108,9 +107,7 @@ class TaskConsumer:
                     self.connection.process_data_events(time_limit=1)
             except Exception:
                 if not self.stop_event.is_set():
-                    LOGGER.exception(
-                        "M1 task consumer lost broker connection; reconnecting"
-                    )
+                    LOGGER.exception("M1 task consumer lost broker connection; reconnecting")
                     self.stop_event.wait(self.settings.rabbitmq_reconnect_delay_seconds)
             finally:
                 if self.connection is not None and self.connection.is_open:
@@ -121,9 +118,7 @@ class TaskConsumer:
             self._loop.close()
             self._loop = None
 
-    def on_message(
-        self, channel: Any, method: Any, properties: Any, body: bytes
-    ) -> None:
+    def on_message(self, channel: Any, method: Any, properties: Any, body: bytes) -> None:
         """Process one delivery and acknowledge it only after its terminal progress is durable.
 
         Malformed deliveries cannot be correlated safely and therefore go directly to the DLQ.
