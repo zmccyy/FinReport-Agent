@@ -33,6 +33,9 @@ prod = [
     "python-multipart>=0.0.6",  # /parse/upload 端点
     "httpx>=0.27",           # Async HTTP client
     "PyMySQL>=1.1",          # M4.05 L3 只读 MySQL（check 数据通路查询侧）
+    # M4.07 本地 embedding（bge-small-zh-v1.5 CPU，spec §4.3；torch 自动随
+    # CPU wheel 安装，M4.08 移除的仅是本地 LLM 训练/推理栈）
+    "sentence-transformers>=2.7",
     # M3.06 报告图表渲染（spec §2.3 M10 ECharts 服务端渲染 PNG）
     "matplotlib>=3.8",       # 3 张图表（饼图/折线/柱状）服务端渲染
     "pillow>=10.0",          # matplotlib 图像后端 + PNG bytes 处理

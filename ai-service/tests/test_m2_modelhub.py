@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -16,6 +18,7 @@ from app.core.exceptions import (
 from app.main import create_app
 from app.modules.modelhub import (
     QUANT_API,
+    BgeSmallEmbedder,
     ModelHub,
     Scene,
     get_modelhub,
@@ -105,6 +108,45 @@ class _FakeBackend:
     def loaded_model(self) -> str | None:
         """Return the loaded model path."""
         return self._loaded_key
+
+
+class _FakeEmbedEncoder:
+    """Minimal SentenceTransformer.encode() fake returning unit 512-vectors."""
+
+    def __init__(self) -> None:
+        self.encode_calls: list[dict[str, Any]] = []
+
+    def encode(
+        self,
+        texts: list[str],
+        *,
+        normalize_embeddings: bool,
+        batch_size: int,
+        show_progress_bar: bool,
+    ) -> list[list[float]]:
+        """Return one canned 512-dim unit vector per input text."""
+        self.encode_calls.append(
+            {
+                "texts": list(texts),
+                "normalize_embeddings": normalize_embeddings,
+                "batch_size": batch_size,
+                "show_progress_bar": show_progress_bar,
+            }
+        )
+        comp = 1.0 / math.sqrt(512)
+        return [[comp] * 512 for _ in texts]
+
+
+class _RecordingEmbedFactory:
+    """Encoder factory recording paths (embedder injection helper)."""
+
+    def __init__(self, encoder: _FakeEmbedEncoder) -> None:
+        self.encoder = encoder
+        self.factory_calls: list[str] = []
+
+    def __call__(self, model_path: str) -> _FakeEmbedEncoder:
+        self.factory_calls.append(model_path)
+        return self.encoder
 
 
 # ---------------------------------------------------------------------------
@@ -279,12 +321,22 @@ def test_modelhub_generate_delegates_to_loader() -> None:
     assert backend.generate_calls[0]["prompt"] == "prompt"
 
 
-def test_modelhub_embed_not_yet_implemented() -> None:
-    """embed() raises AiException until M4.07 wires bge-small-zh-v1.5."""
-    hub = ModelHub(llm_loader=LlmLoader(backend=_FakeBackend()))
+def test_modelhub_embed_delegates_to_embedder(tmp_path: Path) -> None:
+    """embed() forwards to the wired BgeSmallEmbedder (M4.07)."""
+    encoder = _FakeEmbedEncoder()
+    factory = _RecordingEmbedFactory(encoder)
+    settings = Settings(model_embed_path=str(tmp_path))
+    hub = ModelHub(
+        settings=settings,
+        llm_loader=LlmLoader(backend=_FakeBackend()),
+        embedder=BgeSmallEmbedder(settings=settings, encoder_factory=factory),
+    )
 
-    with pytest.raises(AiException, match="M4.07"):
-        hub.embed(["hello"])
+    vectors = hub.embed(["hello"])
+
+    assert len(vectors) == 1
+    assert len(vectors[0]) == 512
+    assert encoder.encode_calls[0]["texts"] == ["hello"]
 
 
 def test_modelhub_route_returns_scene_model_pair() -> None:

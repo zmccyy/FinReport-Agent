@@ -1,13 +1,14 @@
-"""ModelHub: scene-routed inference entrypoint (M2.04 + M4.02 API 化改造).
+"""ModelHub: scene-routed inference entrypoint (M2.04 + M4.02/M4.07 改造).
 
 Spec §3.5 routes inference by scene（2026-08-16 变更，本地训练取消）：
 - ``EXTRACT``  → DeepSeek API deepseek-chat（json_mode）
 - ``REASON``   → DeepSeek API deepseek-chat
-- ``EMBED``    → bge-small-zh-v1.5（本地 CPU，512 维）— M4.07 实装
+- ``EMBED``    → bge-small-zh-v1.5（本地 CPU，512 维，M4.07 实装）
 
 M4.08 起唯一 LLM 后端为 ``DeepSeekBackend``（本地 TransformersBackend
 与遗留 ``7b``/``1.5b`` 键已随 GPU 栈移除）；``llm_backend`` 参数仅供
-单测注入 fake。
+单测注入 fake。Embedding 由 ``BgeSmallEmbedder`` 承担（spec §4.3），
+``embedder`` 参数同样仅供单测注入 fake。
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from typing import Any
 from app.core.config import Settings
 from app.core.exceptions import AiException, ModelLoadException
 from app.modules.modelhub.api_backend import QUANT_API, DeepSeekBackend
+from app.modules.modelhub.embedder import EMBED_DIM, BgeSmallEmbedder
 from app.modules.modelhub.llm_loader import (
     GenerateResult,
     LlmBackend,
@@ -56,6 +58,7 @@ class ModelHub:
         settings: Settings | None = None,
         llm_loader: LlmLoader | None = None,
         llm_backend: LlmBackend | None = None,
+        embedder: BgeSmallEmbedder | None = None,
     ) -> None:
         """Configure the ModelHub.
 
@@ -65,12 +68,15 @@ class ModelHub:
                 a loader wrapping the DeepSeek API backend).
             llm_backend: Optional backend used to build the default loader
                 (ignored when ``llm_loader`` is provided).
+            embedder: Optional BgeSmallEmbedder override for tests (defaults
+                to a lazily-loading bge-small-zh-v1.5 engine, spec §4.3).
         """
         self.settings = settings or Settings()
         if llm_loader is None:
             backend = llm_backend or DeepSeekBackend(self.settings)
             llm_loader = LlmLoader(self.settings, backend=backend)
         self.llm_loader = llm_loader
+        self.embedder = embedder or BgeSmallEmbedder(self.settings)
 
     def load_llm(self, name: str, quant: str) -> None:
         """Load an LLM by logical name and routing label.
@@ -135,21 +141,24 @@ class ModelHub:
         )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed a batch of texts (stub — wired in M4.07 with bge-small-zh-v1.5).
+        """Embed a batch of texts (bge-small-zh-v1.5, spec §4.3, M4.07).
+
+        引擎惰性加载：首次调用触发模型载入（进程内复用），空输入不触
+        发加载。归一化与 512 维校验由 BgeSmallEmbedder 强制执行——这是
+        Milvus ``fin_kb``（dim=512, metric=IP）检索语义的前提。
 
         Args:
-            texts: Texts to embed.
+            texts: Texts to embed (KB chunks / queries).
 
         Returns:
-            One float vector per input text (512-dim, normalized).
+            One 512-dim L2-normalized float vector per input text.
 
         Raises:
-            AiException: Always until M4.07 lands.
+            AiException: When inputs are invalid, inference fails, or the
+                output violates the 512-dim normalized contract.
+            ModelLoadException: When the model cannot be loaded.
         """
-        del texts
-        raise AiException(
-            "ModelHub.embed() is not implemented yet; bge-small-zh-v1.5 embedder lands in M4.07"
-        )
+        return self.embedder.embed(texts)
 
     def route(self, scene: Scene) -> tuple[str, str]:
         """Return the (model_key, quant) pair for a scene.
@@ -173,7 +182,7 @@ class ModelHub:
 
         Raises:
             AiException: When the scene does not route through the LLM loader
-                (EMBED wires its own engine in M4.07).
+                (EMBED uses BgeSmallEmbedder, M4.07).
             ModelLoadException: When the backend fails to load.
         """
         if scene not in LLM_SCENES:
@@ -189,7 +198,8 @@ class ModelHub:
         """Return a JSON-serializable snapshot of the ModelHub state.
 
         Returns:
-            A dict with the loaded LLM key and per-scene routing.
+            A dict with the loaded LLM key, per-scene routing, and the
+            embed engine state (model / dim / loaded).
         """
         loaded = self.llm_loader.loaded_model()
         return {
@@ -197,6 +207,11 @@ class ModelHub:
             "is_loaded": loaded is not None,
             "scenes": {
                 scene.value: {"model": k, "quant": q} for scene, (k, q) in SCENE_MODEL_MAP.items()
+            },
+            "embed": {
+                "model": self.embedder.MODEL_KEY,
+                "dim": EMBED_DIM,
+                "is_loaded": self.embedder.is_loaded(),
             },
         }
 
