@@ -31,7 +31,7 @@ from app.utils.logger import get_logger
 
 LOGGER = get_logger(__name__)
 
-# API 路由的 quant 标签（区别于本地 gptq-int4/nf4）。
+# API 路由的 quant 标签（M4.08 后唯一后端；本地 gptq-int4/nf4 已随 GPU 栈移除）。
 QUANT_API = "api"
 
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
@@ -42,7 +42,7 @@ class DeepSeekBackend:
 
     ``load()`` is a cheap idempotent operation (validate key + prepare the
     HTTP client) — there is no resident model, unlike the local
-    TransformersBackend it replaces.
+    TransformersBackend it replaced (removed in M4.08).
     """
 
     def __init__(
@@ -61,21 +61,20 @@ class DeepSeekBackend:
         self._transport = transport
         self._client: httpx.Client | None = None
 
-    def load(self, model_path: str, quant: str) -> None:
+    def load(self, model_key: str, quant: str) -> None:
         """Prepare the API client (idempotent, no resident model).
 
         Args:
-            model_path: Unused for API backends (kept for Protocol compat).
+            model_key: Unused for API backends (kept for Protocol compat).
             quant: Quant label; expected ``"api"`` for documentation only.
 
         Raises:
             ModelLoadException: When the API key is not configured.
         """
-        del model_path, quant
+        del model_key, quant
         if not self.settings.llm_api_key:
             raise ModelLoadException(
-                "LLM_API_KEY is not configured; set it in deploy/.env "
-                "(see AGENTS.md §8.1)"
+                "LLM_API_KEY is not configured; set it in deploy/.env (see AGENTS.md §8.1)"
             )
         if self._client is None:
             self._client = httpx.Client(
@@ -157,8 +156,7 @@ class DeepSeekBackend:
                 status_code = error.response.status_code
                 if status_code not in _RETRYABLE_STATUS_CODES:
                     raise AiException(
-                        f"DeepSeek API returned {status_code}: "
-                        f"{error.response.text[:200]}"
+                        f"DeepSeek API returned {status_code}: {error.response.text[:200]}"
                     ) from error
                 last_error = error
                 LOGGER.warning(
@@ -177,15 +175,11 @@ class DeepSeekBackend:
                 )
 
             if attempt < max_attempts:
-                delay = self.settings.llm_api_retry_base_delay_seconds * (
-                    2 ** (attempt - 1)
-                )
+                delay = self.settings.llm_api_retry_base_delay_seconds * (2 ** (attempt - 1))
                 LOGGER.info("[DeepSeekBackend] retrying in %.1fs", delay)
                 time.sleep(delay)
 
-        raise AiException(
-            f"DeepSeek API failed after {max_attempts} attempts: {last_error}"
-        )
+        raise AiException(f"DeepSeek API failed after {max_attempts} attempts: {last_error}")
 
     def unload(self) -> None:
         """Close the HTTP client (no device memory to free)."""

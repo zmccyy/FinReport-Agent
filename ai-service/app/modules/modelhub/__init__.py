@@ -1,13 +1,10 @@
-"""M11 ModelHub package: model loading + inference routing."""
+"""M11 ModelHub package: API inference routing (M4.08: GPU 栈已移除)."""
 
 from app.modules.modelhub.api_backend import QUANT_API, DeepSeekBackend
 from app.modules.modelhub.llm_loader import (
-    QUANT_GPTQ_INT4,
-    QUANT_NF4,
     GenerateResult,
     LlmBackend,
     LlmLoader,
-    TransformersBackend,
 )
 from app.modules.modelhub.modelhub import (
     LLM_SCENES,
@@ -17,30 +14,17 @@ from app.modules.modelhub.modelhub import (
     get_modelhub,
     reset_modelhub,
 )
-from app.modules.modelhub.vram_scheduler import (
-    MODEL_LOCK_KEY_PREFIX,
-    MODEL_LOCK_TTL_SECONDS_DEFAULT,
-    ModelLock,
-    VramScheduler,
-)
 
 __all__ = [
     "LLM_SCENES",
-    "MODEL_LOCK_KEY_PREFIX",
-    "MODEL_LOCK_TTL_SECONDS_DEFAULT",
     "QUANT_API",
-    "QUANT_GPTQ_INT4",
-    "QUANT_NF4",
     "SCENE_MODEL_MAP",
     "DeepSeekBackend",
     "GenerateResult",
     "LlmBackend",
     "LlmLoader",
     "ModelHub",
-    "ModelLock",
     "Scene",
-    "TransformersBackend",
-    "VramScheduler",
     "get_modelhub",
     "reset_modelhub",
 ]

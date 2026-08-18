@@ -13,12 +13,12 @@
    IS 必须含 ``营业收入`` / ``净利润``；CF 必须含 ``经营活动产生的现金流量净额``。
    缺失只产 warning，不阻断（spec 没要求硬阻断）。
 
-spec §10.3 降级链：抽取小模型 JSON 失败 → 重试 1 次 (temp=0.1) → 改用 7B。
+spec §10.3 降级链（2026-08-16 API 化后）：JSON 失败 → 重试 1 次 (temp=0.1)。
 ``extract_with_retry`` 实现第一次失败后用 ``build_retry_prompt(error_hint=...)``
 + 低 temp 重试一次；两次都失败返回最后一次的 ``ExtractionResult``，由 caller
-决定是否转 7B（M4 T1 1.5B 路径）或上抛（M2.08 编排层）。
+决定是否降级（保留规则结果/模板报告）或上抛（M2.08 编排层）。
 
-Validator 不持有 ``model_lock`` 也不调 ``hub.generate`` —— 重试时通过
+Validator 不调 ``hub.generate`` —— 重试时通过
 ``Extractor.extract_with_prompt`` 公开方法走，保持职责单一。
 """
 
@@ -70,9 +70,7 @@ class ValidationIssue(BaseModel):
     severity: str = Field(description="error / warning")
     code: str = Field(description="问题代码，如 nan_value / missing_required_item")
     message: str = Field(description="人类可读的问题描述")
-    path: str = Field(
-        default="", description="问题位置，如 statements.balance_sheet[0].value"
-    )
+    path: str = Field(default="", description="问题位置，如 statements.balance_sheet[0].value")
 
 
 class ValidationResult(BaseModel):
@@ -129,9 +127,7 @@ class Validator:
         """
         if self._schema is None:
             path = self._schema_path or (
-                Path(__file__).resolve().parents[2]
-                / "schemas"
-                / "statement_schema.json"
+                Path(__file__).resolve().parents[2] / "schemas" / "statement_schema.json"
             )
             try:
                 import json
@@ -201,9 +197,7 @@ class Validator:
             error_hint=error_hint,
         )
 
-    def validate_statement(
-        self, statement: FinancialStatement
-    ) -> list[ValidationIssue]:
+    def validate_statement(self, statement: FinancialStatement) -> list[ValidationIssue]:
         """Run business-rule checks on a parsed ``FinancialStatement``.
 
         Args:
@@ -251,9 +245,7 @@ class Validator:
                 ValidationIssue(
                     severity="warning",
                     code="unknown_unit",
-                    message=(
-                        f"unit 不在常见枚举 {sorted(_VALID_UNITS)} 中：{statement.unit!r}"
-                    ),
+                    message=(f"unit 不在常见枚举 {sorted(_VALID_UNITS)} 中：{statement.unit!r}"),
                     path="unit",
                 )
             )
@@ -386,11 +378,11 @@ def extract_with_retry(
            ``retry_temperature`` (default 0.1, spec §10.3).
         4. Validate the retry; if valid, return ``(retry_result, retry_validation)``.
         5. Still invalid: return the retry result + validation; the caller
-           (M2.08 orchestrator) decides whether to fall back to the 7B
-           model (spec §10.3 "改用 7B") or fail the task.
+           (M2.08 orchestrator) decides whether to degrade (keep rule
+           results / template report) or fail the task.
 
     Args:
-        extractor: Configured ``Extractor`` (caller holds model_lock).
+        extractor: Configured ``Extractor``.
         validator: Configured ``Validator``.
         table_html: Raw HTML/Markdown table markup from the parser.
         statement_type: Target statement type.

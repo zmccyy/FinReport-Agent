@@ -142,11 +142,11 @@ def build_review_prompt(
 
 
 class LLMReviewer:
-    """LLM 复核勾稽 — 对失败的硬编码规则调用 7B 解释差异原因。
+    """LLM 复核勾稽 — 对失败的硬编码规则调用 LLM（DeepSeek API）解释差异原因。
 
     Attributes:
-        hub: ModelHub 实例（必须已加载 7B；调用方负责 ``load_for_scene`` +
-            ``model_lock``，与 ``Extractor`` 保持一致）。
+        hub: ModelHub 实例（DeepSeek API 后端，首次调用自动初始化，
+            与 ``Extractor`` 保持一致）。
         max_new_tokens: 复核输出最大 token 数。
         temperature: 采样温度（0 = greedy）。
         timeout_seconds: 单次复核 SLA 超时。

@@ -1,4 +1,4 @@
-"""AI service exception hierarchy."""
+"""AI service exception hierarchy (M4.08: model_lock 异常随 GPU 栈移除)."""
 
 
 class AiException(Exception):
@@ -10,16 +10,8 @@ class InvalidTaskMessageException(AiException):
 
 
 class ModelLoadException(AiException):
-    """Raised when a model cannot be loaded (OOM, missing weights, deps, etc.)."""
+    """Raised when a model backend cannot initialize (missing key, deps, etc.)."""
 
 
 class InferenceTimeoutException(AiException):
     """Raised when model inference exceeds the configured SLA timeout."""
-
-
-class LockAcquisitionException(AiException):
-    """Raised when a Redis distributed lock cannot be acquired due to errors."""
-
-
-class ModelLockBusyException(AiException):
-    """Raised when the model_lock is held by another worker (spec §3.9)."""

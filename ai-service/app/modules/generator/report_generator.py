@@ -81,8 +81,8 @@ class ReportGenerator:
     """5 段式财报报告生成器（spec §2.3 M10）。
 
     Attributes:
-        hub: ModelHub 实例（必须已加载 7B；调用方负责 ``load_for_scene`` +
-            ``model_lock``，与 ``Extractor`` / ``LLMReviewer`` 保持一致）。
+        hub: ModelHub 实例（DeepSeek API 后端，首次调用自动初始化，
+            与 ``Extractor`` / ``LLMReviewer`` 保持一致）。
         max_new_tokens: 报告输出最大 token 数。
         temperature: 采样温度。
         timeout_seconds: 单次生成 SLA 超时。
@@ -472,9 +472,7 @@ def _build_fallback_report(
     # 5. 结论
     conclusion_lines: list[str] = []
     if check_result.all_pass:
-        conclusion_lines.append(
-            "本期财报勾稽规则全部通过、未检出异常，整体财务数据一致性良好。"
-        )
+        conclusion_lines.append("本期财报勾稽规则全部通过、未检出异常，整体财务数据一致性良好。")
     else:
         failed = sum(1 for r in check_result.rules if not r.is_pass)
         conclusion_lines.append(

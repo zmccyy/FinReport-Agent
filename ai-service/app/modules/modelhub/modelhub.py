@@ -5,15 +5,14 @@ Spec §3.5 routes inference by scene（2026-08-16 变更，本地训练取消）
 - ``REASON``   → DeepSeek API deepseek-chat
 - ``EMBED``    → bge-small-zh-v1.5（本地 CPU，512 维）— M4.07 实装
 
-M4.02 起 ModelHub 默认后端为 ``DeepSeekBackend``（无需显式 load，
-generate() 自动完成轻量初始化）。本地 TransformersBackend 仍可注入
-（遗留测试兼容），M4.08 将随 GPU 栈一并移除。
+M4.08 起唯一 LLM 后端为 ``DeepSeekBackend``（本地 TransformersBackend
+与遗留 ``7b``/``1.5b`` 键已随 GPU 栈移除）；``llm_backend`` 参数仅供
+单测注入 fake。
 """
 
 from __future__ import annotations
 
 from enum import Enum
-from pathlib import Path
 from typing import Any
 
 from app.core.config import Settings
@@ -74,26 +73,23 @@ class ModelHub:
         self.llm_loader = llm_loader
 
     def load_llm(self, name: str, quant: str) -> None:
-        """Load an LLM by logical name and quantization.
+        """Load an LLM by logical name and routing label.
 
         Args:
-            name: Logical model key (``"deepseek-chat"`` / legacy ``"7b"``).
-            quant: Quantization label (``"api"`` / ``"gptq-int4"`` / ``"nf4"``).
+            name: Logical model key (``"deepseek-chat"``).
+            quant: Routing label; M4.08 起仅支持 ``"api"``。
 
         Raises:
-            ModelLoadException: When ``name`` is unknown or the backend fails
-                to load.
+            ModelLoadException: When ``quant`` is not the API label or
+                the backend fails to load.
         """
-        # API 路由无本地产物，跳过路径解析——避免模型名与
-        # settings.llm_api_model 耦合（配置改名后仍可加载）。
-        path = "" if quant == QUANT_API else self._resolve_model_path(name)
-        LOGGER.info(
-            "[ModelHub.load_llm] name=%s quant=%s path=%s",
-            name,
-            quant,
-            path,
-        )
-        self.llm_loader.load(name, path, quant)
+        if quant != QUANT_API:
+            raise ModelLoadException(
+                f"Unsupported quant={quant!r}: the local GPU stack was "
+                "removed in M4.08; only the DeepSeek API route remains"
+            )
+        LOGGER.info("[ModelHub.load_llm] name=%s quant=%s", name, quant)
+        self.llm_loader.load(name, "", quant)
 
     def generate(
         self,
@@ -152,8 +148,7 @@ class ModelHub:
         """
         del texts
         raise AiException(
-            "ModelHub.embed() is not implemented yet; "
-            "bge-small-zh-v1.5 embedder lands in M4.07"
+            "ModelHub.embed() is not implemented yet; bge-small-zh-v1.5 embedder lands in M4.07"
         )
 
     def route(self, scene: Scene) -> tuple[str, str]:
@@ -182,9 +177,7 @@ class ModelHub:
             ModelLoadException: When the backend fails to load.
         """
         if scene not in LLM_SCENES:
-            raise AiException(
-                f"Scene {scene.value} does not route through the LLM backend"
-            )
+            raise AiException(f"Scene {scene.value} does not route through the LLM backend")
         model_key, quant = self.route(scene)
         self.load_llm(model_key, quant)
 
@@ -203,36 +196,9 @@ class ModelHub:
             "loaded_llm": loaded,
             "is_loaded": loaded is not None,
             "scenes": {
-                scene.value: {"model": k, "quant": q}
-                for scene, (k, q) in SCENE_MODEL_MAP.items()
+                scene.value: {"model": k, "quant": q} for scene, (k, q) in SCENE_MODEL_MAP.items()
             },
         }
-
-    def _resolve_model_path(self, name: str) -> str:
-        """Resolve a logical model key to a filesystem path.
-
-        API-routed models never reach this method (``load_llm`` short-circuits
-        on ``quant == "api"``).
-
-        Args:
-            name: Logical model key (legacy local keys; M4.08 移除).
-
-        Returns:
-            Absolute or relative path to the model directory.
-
-        Raises:
-            ModelLoadException: When the key is unknown.
-        """
-        mapping: dict[str, str] = {
-            # 遗留本地键（M4.08 移除）。
-            "7b": self.settings.model_7b_path,
-            "1.5b": self.settings.model_15b_path,
-            "bge": self.settings.model_embed_path,
-        }
-        if name not in mapping:
-            raise ModelLoadException(f"Unknown model name: {name}")
-        path = mapping[name]
-        return str(Path(path).expanduser()) if path else ""
 
 
 _DEFAULT_HUB: ModelHub | None = None

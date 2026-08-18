@@ -33,21 +33,12 @@ class Settings(BaseSettings):
     mysql_user: str = "finreport"
     mysql_password: str = "finreport"
     mysql_database: str = "finreport"
-    # M2.04 ModelHub — local model paths (relative to repo root or absolute).
-    model_7b_path: str = "models/Qwen2.5-7B-Instruct-GPTQ-Int4"
-    model_15b_path: str = "models/Qwen2.5-1.5B-Instruct"
+    # M4.07 本地 embedding 模型路径（bge-small-zh-v1.5，CPU）。
     model_embed_path: str = "models/bge-small-zh-v1.5"
-    # Inference SLA (spec §3.7 / §12.1).
+    # Inference SLA (spec §3.7 / §12.1) — M4.08 后作用于 DeepSeek API 路由。
     model_load_timeout_seconds: int = 300
     model_generate_timeout_seconds: int = 60
     model_max_new_tokens: int = 1024
-    model_quant_7b: str = "gptq-int4"
-    model_quant_15b: str = "nf4"
-    # M2.05 model_lock + VRAM scheduler (spec §3.9 / §5.4.1).
-    redis_url: str = "redis://localhost:6379/0"
-    model_lock_ttl_seconds: int = 300
-    model_lock_retry_seconds: float = 2.0
-    vram_idle_threshold_seconds: int = 600
     # M4.02 DeepSeek API (OpenAI 兼容协议, 2026-08-16 起本地训练取消).
     llm_api_base_url: str = "https://api.deepseek.com"
     llm_api_key: str = ""

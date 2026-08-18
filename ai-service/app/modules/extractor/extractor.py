@@ -1,24 +1,16 @@
-"""M7 Extractor: 7B general-prompt baseline for three-statement extraction.
+"""M7 Extractor: LLM three-statement extraction via the DeepSeek API.
 
-Spec §2.3 M7 + plan M2.06:
+Spec §2.3 M7 + plan M2.06（2026-08-16 API 化变更，M4.08 移除本地 GPU 栈）:
 
 * ``Extractor.extract`` builds a JSON-constrained prompt via
-  ``build_extract_prompt``, calls ``ModelHub.generate``, and parses
-  the model output into a ``FinancialStatement``.
+  ``build_extract_prompt``, calls ``ModelHub.generate`` (json_mode), and
+  parses the model output into a ``FinancialStatement``.
 * JSON parse failures are NOT raised — they return
   ``ExtractionResult(success=False, error=...)`` so the M2.07 validator
-  can retry with ``build_retry_prompt`` (temp=0.1) and fall back to
-  the 7B-emit-correction path (spec §10.3).
-* The Extractor does NOT acquire the ``model_lock`` itself — that is
-  the caller's responsibility (``VramScheduler.load_for_scene_with_lock``
-  in the MQ handler), so the class stays single-purpose and unit-testable
-  with a mock ``ModelHub``.
-
-Scene choice: M2.06 ships the 7B general-prompt baseline
-(``Scene.REASON`` per ``app.modules.modelhub.modelhub``); the caller
-loads the 7B before invoking ``extract``. The M4 T1 1.5B QLoRA swap
-will switch the caller to ``Scene.EXTRACT`` without touching the
-``Extractor`` class itself.
+  can retry with ``build_retry_prompt`` (temp=0.1).
+* The Extractor holds no inference resources itself — inference routes
+  through the DeepSeek API backend inside ``ModelHub``, so the class stays
+  single-purpose and unit-testable with a mock ``ModelHub``.
 """
 
 from __future__ import annotations
@@ -63,9 +55,8 @@ class Extractor:
         """Configure the extractor.
 
         Args:
-            hub: ModelHub instance (must have an LLM loaded before
-                ``extract`` is called; the caller is responsible for
-                ``load_for_scene`` + ``model_lock``).
+            hub: ModelHub instance (the API backend auto-initializes on
+                first generate; no explicit load is required).
             default_max_new_tokens: Override ``Settings.model_max_new_tokens``.
             default_temperature: Default sampling temperature (0 = greedy).
             default_timeout_seconds: Override ``Settings.model_generate_timeout_seconds``.
@@ -98,10 +89,8 @@ class Extractor:
     ) -> ExtractionResult:
         """Extract one statement table into a ``FinancialStatement``.
 
-        The caller is responsible for loading the right LLM via
-        ``VramScheduler.load_for_scene_with_lock(Scene.REASON)`` (M2.06
-        baseline) or ``Scene.EXTRACT`` (M4 T1 1.5B QLoRA path) before
-        calling this method.
+        Inference routes through the DeepSeek API backend (M4.08 removed
+        the local GPU stack); no explicit model loading is required.
 
         Args:
             table_html: Raw HTML/Markdown table markup from the parser.
@@ -135,13 +124,9 @@ class Extractor:
         gen_result = self.hub.generate(
             prompt,
             max_new_tokens=max_new_tokens or self.default_max_new_tokens,
-            temperature=(
-                self.default_temperature if temperature is None else temperature
-            ),
+            temperature=(self.default_temperature if temperature is None else temperature),
             timeout_seconds=(
-                self.default_timeout_seconds
-                if timeout_seconds is None
-                else timeout_seconds
+                self.default_timeout_seconds if timeout_seconds is None else timeout_seconds
             ),
         )
         raw_text = gen_result.text
@@ -176,8 +161,8 @@ class Extractor:
         ``build_retry_prompt`` and a lower temperature, then calls this
         method to re-generate without re-building the prompt.
 
-        The caller is still responsible for the model_lock; this method
-        only covers the generate + parse leg.
+        This method only covers the generate + parse leg (the API backend
+        holds no resident resources).
 
         Args:
             prompt: Pre-built prompt string (typically a retry prompt
@@ -197,13 +182,9 @@ class Extractor:
         gen_result = self.hub.generate(
             prompt,
             max_new_tokens=max_new_tokens or self.default_max_new_tokens,
-            temperature=(
-                self.default_temperature if temperature is None else temperature
-            ),
+            temperature=(self.default_temperature if temperature is None else temperature),
             timeout_seconds=(
-                self.default_timeout_seconds
-                if timeout_seconds is None
-                else timeout_seconds
+                self.default_timeout_seconds if timeout_seconds is None else timeout_seconds
             ),
         )
         raw_text = gen_result.text
@@ -270,9 +251,7 @@ class Extractor:
                 statement_type.value,
                 error,
             )
-            return ExtractionResult(
-                **common_kwargs, error=f"schema validation failed: {error}"
-            )
+            return ExtractionResult(**common_kwargs, error=f"schema validation failed: {error}")
 
         return ExtractionResult(**common_kwargs, statement=statement)
 
@@ -350,9 +329,7 @@ class Extractor:
         # Accept either the expected type only or all three; we keep only
         # the requested type to keep downstream consumers simple.
         raw_items = (
-            raw_statements.get(expected_type.value)
-            or raw_statements.get(expected_type.name)
-            or []
+            raw_statements.get(expected_type.value) or raw_statements.get(expected_type.name) or []
         )
         if not isinstance(raw_items, list):
             raise ValueError(f"statements[{expected_type.value}] must be a list")
@@ -360,9 +337,7 @@ class Extractor:
         items: list[StatementItem] = []
         for idx, raw_item in enumerate(raw_items):
             if not isinstance(raw_item, dict):
-                raise ValueError(
-                    f"statements[{expected_type.value}][{idx}] must be an object"
-                )
+                raise ValueError(f"statements[{expected_type.value}][{idx}] must be an object")
             items.append(StatementItem.model_validate(raw_item))
 
         return FinancialStatement(

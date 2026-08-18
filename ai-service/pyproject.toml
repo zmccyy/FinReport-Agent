@@ -25,7 +25,6 @@ prod = [
     "pydantic>=2.6",
     "pydantic-settings>=2.1",
     "pika>=1.3",             # RabbitMQ client
-    "redis>=5.0",            # Redis client
     "pymilvus>=2.4",         # Milvus client
     "minio>=7.2",            # MinIO client
     "pymupdf>=1.24",         # PDF 解析
@@ -34,10 +33,6 @@ prod = [
     "python-multipart>=0.0.6",  # /parse/upload 端点
     "httpx>=0.27",           # Async HTTP client
     "PyMySQL>=1.1",          # M4.05 L3 只读 MySQL（check 数据通路查询侧）
-    "torch~=2.3.0",        # M2.04 ModelHub 推理后端（CUDA 12.1 wheel）；spec §1 锁定 2.3.x
-    "transformers>=4.40",    # M2.04 LLM 加载（GPTQ / bitsandbytes 4-bit）
-    "accelerate>=0.30",      # M2.04 device_map="auto" + CPU offload
-    "bitsandbytes>=0.43",    # M2.04 nf4 量化（1.5B QLoRA 基座）
     # M3.06 报告图表渲染（spec §2.3 M10 ECharts 服务端渲染 PNG）
     "matplotlib>=3.8",       # 3 张图表（饼图/折线/柱状）服务端渲染
     "pillow>=10.0",          # matplotlib 图像后端 + PNG bytes 处理

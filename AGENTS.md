@@ -439,13 +439,15 @@ Vue 组件：
 | L2 集成异常 | IntegrationException | AiServiceException / MqException |
 | L3 AI 异常 | AiException | ModelLoadException / InferenceTimeoutException |
 
-### 10.3 降级策略
+### 10.3 降级策略（2026-08-16 API 化后，本地 GPU 栈已移除）
 
 | 场景 | 降级动作 |
 |---|---|
-| 本地 7B 超时 (>60s) | 切 API 72B |
-| 本地 7B OOM | 释放模型 → 重启 ModelHub → 重试 1 次 → 转 API |
-| 抽取小模型 JSON 失败 | 重试 1 次 (temp=0.1) → 改用 7B |
+| DeepSeek API 429/5xx/网络错误 | 指数退避（1s, 2s）重试 2 次 |
+| DeepSeek API 4xx | 不重试，抛 AiException |
+| API 超时/重试耗尽（复核场景） | LLMReviewer 降级保留规则结果 |
+| API 超时/重试耗尽（报告场景） | ReportGenerator 降级模板报告 |
+| 抽取 JSON 失败 | 重试 1 次 (temp=0.1) |
 | Milvus 不可用 | search_kb 返回 暂不可用，问答继续 |
 | MySQL 死锁 | 重试 3 次（指数退避） |
 
@@ -473,7 +475,7 @@ Vue 组件：
 | 级别 | 使用场景 |
 |---|---|
 | ERROR | 系统异常、需要立即处理（如 OOM、DB 连接失败） |
-| WARN | 业务异常但可降级（如 7B 超时切 API） |
+| WARN | 业务异常但可降级（如 API 重试耗尽转模板报告） |
 | INFO | 关键业务节点（如任务开始、完成） |
 | DEBUG | 调试信息（入参、出参、状态变化） |
 | TRACE | 极细粒度（如每个 token 推理） |
@@ -507,7 +509,7 @@ Vue 组件：
 - 在 SSE 流里同步等待 MQ（用背压 buffer）
 - 大对象进 Redis（用 hash 分字段）
 - PDF 全文进内存（用流式解析）
-- 模型推理时切模型（用 model_lock 防抖动）
+- API 并发过载（MQ prefetch_count=1 兜底，勿擅自调大）
 
 ---
 
@@ -563,15 +565,15 @@ Vue 组件：
 
 ---
 
-## 15. 常见问题速查
+## 15. 常见问题速查（2026-08-16 API 化后，本地 GPU 栈已移除）
 
-### Q1: OOM 怎么办？
+### Q1: DeepSeek API 调用失败？
 
-A: 检查是否启用 gradient_checkpointing + paged_adamw_8bit + 4-bit 量化；降低 batch_size 到 1；用 gradient_accumulation_steps 补偿。
+A: 看 LLM_API_KEY 是否已配置（deploy/.env）；429/5xx 会自动退避重试 2 次；4xx 检查 payload 与 json_mode 的 "json" 字样要求；重试耗尽走降级链（§10.3）。
 
 ### Q2: MQ 消息积压？
 
-A: 检查消费者是否卡在模型加载（看 model_lock）；增加 worker（注意显存）；查看 DLQ 是否有死信。
+A: 检查消费者是否卡在 API 重试（看日志 retry 计数）；增加 ai-service worker 副本（CPU 即可）；查看 DLQ 是否有死信。
 
 ### Q3: SSE 断线重连不工作？
 
@@ -579,11 +581,11 @@ A: 检查客户端是否传 Last-Event-ID；L2 是否从 Redis fin:task:progress
 
 ### Q4: 抽取 JSON 解析失败？
 
-A: 检查 prompt 是否强约束 JSON；启用 validator 重试（temp=0.1）；仍失败改用 7B 兜底。
+A: 检查 prompt 是否强约束 JSON 且包含 "json" 字样（DeepSeek json_mode 协议要求）；启用 validator 重试（temp=0.1）；仍失败按 §10.3 降级。
 
-### Q5: 显存切换抖动？
+### Q5: LlmLoader 报 "requires an explicit backend"？
 
-A: 检查 EXTRACT 链路是否只用 1.5B、REASON 链路是否只用 7B；调整 model_lock TTL。
+A: M4.08 起默认 TransformersBackend 已删除，生产代码必须显式注入 DeepSeekBackend；单测注入 fake backend。
 
 ---
 
