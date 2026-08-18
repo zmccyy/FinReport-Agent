@@ -3,21 +3,16 @@
 下载项目所需的预训练模型（ModelScope 优先，HuggingFace 镜像备选）。
 
 用法:
-    python scripts/download_models.py --model 7b          # 只下载 7B GPTQ
-    python scripts/download_models.py --model 1.5b        # 只下载 1.5B
-    python scripts/download_models.py --model bge         # 只下载 bge
-    python scripts/download_models.py --required          # 下载必需模型（7B/1.5B/bge）
-    python scripts/download_models.py --all               # 下载全部（含 LayoutLMv3）
-    python scripts/download_models.py --list              # 列出所有模型信息
-    python scripts/download_models.py --source hf         # 强制使用 HuggingFace 镜像
+    python scripts/download_models.py                 # 下载 bge（唯一本地模型）
+    python scripts/download_models.py --list          # 查看模型信息
+    python scripts/download_models.py --source hf     # 强制使用 HuggingFace 镜像
 
-技术栈说明:
-    - 7B: GPTQ-Int4 量化（与 transformers + auto-gptq 兼容）
-    - 1.5B: 原版 fp16（QLoRA 微调基座）
-    - bge: 原版（LoRA 微调基座）
-    - LayoutLMv3: 原版（M4 表格识别用）
+2026-08-16 起 LLM 推理走 DeepSeek API（decision record），本地仅保留
+bge-small-zh-v1.5 embedding（~95MB，CPU）；原 7B/1.5B/LayoutLMv3 条目
+已随 M4 方向变更作废删除。
 
-模型存放: E:\项目\FinReport Agent\models\（不入 git）
+模型存放: 项目根目录 models/（不入 git）；容器部署时经 docker cp 复制进
+finreport-models 卷（见 deploy/.env.example）。
 """
 
 import argparse
@@ -33,49 +28,18 @@ MODELS_DIR.mkdir(exist_ok=True)
 
 
 # ============================================================================
-# 模型清单
+# 模型清单（M4.09：仅 bge-small-zh-v1.5）
 # ============================================================================
 
 MODELS = {
-    "7b": {
-        "name": "Qwen2.5-7B-Instruct (GPTQ-Int4)",
-        "description": "主推理模型 - ReAct 问答 / 报告生成",
-        "modelscope_id": "qwen/Qwen2.5-7B-Instruct-GPTQ-Int4",
-        "hf_id": "Qwen/Qwen2.5-7B-Instruct-GPTQ-Int4",
-        "size_gb": 4.5,
-        "target_subdir": "Qwen2.5-7B-Instruct-GPTQ-Int4",
-        "required": True,
-        "used_in": "M2+ (推理)",
-    },
-    "1.5b": {
-        "name": "Qwen2.5-1.5B-Instruct (fp16)",
-        "description": "财报抽取微调基座 - QLoRA",
-        "modelscope_id": "qwen/Qwen2.5-1.5B-Instruct",
-        "hf_id": "Qwen/Qwen2.5-1.5B-Instruct",
-        "size_gb": 3.1,
-        "target_subdir": "Qwen2.5-1.5B-Instruct",
-        "required": True,
-        "used_in": "M2+ (微调+推理)",
-    },
     "bge": {
         "name": "bge-small-zh-v1.5",
-        "description": "金融领域 embedding 基座 - LoRA",
+        "description": "本地 embedding（512 维，Milvus fin_kb 配套）",
         "modelscope_id": "Xorbits/bge-small-zh-v1.5",
         "hf_id": "BAAI/bge-small-zh-v1.5",
         "size_gb": 0.1,
         "target_subdir": "bge-small-zh-v1.5",
-        "required": True,
-        "used_in": "M2+ (向量检索)",
-    },
-    "layoutlm": {
-        "name": "LayoutLMv3-base",
-        "description": "财报表格结构识别 - 全参微调",
-        "modelscope_id": "AI-ModelScope/layoutlmv3-base",
-        "hf_id": "microsoft/layoutlmv3-base",
-        "size_gb": 0.5,
-        "target_subdir": "layoutlmv3-base",
-        "required": False,
-        "used_in": "M4 (表格识别)",
+        "used_in": "M4.07+ (embed / M5 RAG)",
     },
 }
 
@@ -164,26 +128,23 @@ def download_model(key: str, source: str = "auto") -> bool:
 # ============================================================================
 
 def list_models():
-    print("\n=== 模型清单 ===\n")
-    print(f"{'Key':<10} {'名称':<40} {'大小':<10} {'阶段':<15} {'优先级'}")
-    print("-" * 90)
+    print("\n=== 模型清单（2026-08-16 起 LLM 走 DeepSeek API，本地仅 embedding）===\n")
+    print(f"{'Key':<10} {'名称':<25} {'大小':<10} {'阶段'}")
+    print("-" * 70)
     for key, m in MODELS.items():
-        tag = "必需" if m["required"] else "可选"
-        print(f"{key:<10} {m['name']:<40} ~{m['size_gb']}GB{'':<5} {m['used_in']:<15} {tag}")
+        print(f"{key:<10} {m['name']:<25} ~{m['size_gb']}GB     {m['used_in']}")
 
     print(f"\n存放目录: {MODELS_DIR}")
-    total_required = sum(m["size_gb"] for m in MODELS.values() if m["required"])
-    total_all = sum(m["size_gb"] for m in MODELS.values())
-    print(f"必需模型总量: ~{total_required:.1f} GB")
-    print(f"全部模型总量: ~{total_all:.1f} GB")
+    total_gb = sum(m["size_gb"] for m in MODELS.values())
+    print(f"模型总量: ~{total_gb:.1f} GB")
 
     print("\n=== 下载命令 ===")
-    print("  # 下载所有必需模型 (~8.2 GB)")
-    print("  python scripts/download_models.py --required")
-    print("\n  # 只下载单个")
-    print("  python scripts/download_models.py --model bge")
+    print("  # 下载全部本地模型（当前仅 bge，~0.1GB）")
+    print("  python scripts/download_models.py")
     print("\n  # 强制使用 HuggingFace 镜像")
-    print("  python scripts/download_models.py --required --source hf")
+    print("  python scripts/download_models.py --source hf")
+    print("\n=== 容器部署（模型进 finreport-models 卷）===")
+    print("  docker cp ./models/. finreport-models:/models/")
 
 
 def check_dependencies():
@@ -216,15 +177,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="\n".join([
             "示例:",
-            "  python scripts/download_models.py --list          # 查看模型清单",
-            "  python scripts/download_models.py --required      # 下载必需模型",
-            "  python scripts/download_models.py --model 7b      # 只下载 7B",
-            "  python scripts/download_models.py --all --source hf  # 全部用 HF 镜像",
+            "  python scripts/download_models.py              # 下载 bge",
+            "  python scripts/download_models.py --list       # 查看模型清单",
+            "  python scripts/download_models.py --source hf  # 全部用 HF 镜像",
         ]),
     )
     parser.add_argument("--model", choices=list(MODELS.keys()), help="下载指定模型")
-    parser.add_argument("--required", action="store_true", help="只下载必需模型 (7B/1.5B/bge)")
-    parser.add_argument("--all", action="store_true", help="下载所有模型（含 LayoutLMv3）")
     parser.add_argument("--list", action="store_true", help="列出所有模型信息")
     parser.add_argument(
         "--source",
@@ -238,15 +196,8 @@ def main():
         list_models()
         return
 
-    if args.model:
-        keys = [args.model]
-    elif args.required:
-        keys = [k for k, v in MODELS.items() if v["required"]]
-    elif args.all:
-        keys = list(MODELS.keys())
-    else:
-        parser.print_help()
-        sys.exit(1)
+    # M4.09：仅剩 bge 一个模型，无参数默认下载全部（即 bge）。
+    keys = [args.model] if args.model else list(MODELS.keys())
 
     # 检查依赖
     if not check_dependencies():

@@ -187,6 +187,10 @@ services:
     build:
       context: ../ai-service
       dockerfile: Dockerfile
+      # 生产构建必须显式指向 runtime stage：Docker 默认构建最后一个
+      # stage（此处为 dev），M1 以来生产镜像从未包含 prod 依赖（M4.09 修复）。
+      # dev overlay 用 target: dev 覆盖此值。
+      target: runtime
     image: finreport/ai-service:latest
     container_name: finreport-ai-service
     restart: unless-stopped
@@ -199,9 +203,6 @@ services:
       MYSQL_USER: ${MYSQL_USER:-finreport}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-finreport}
       MYSQL_DATABASE: ${MYSQL_DATABASE:-finreport}
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
       RABBITMQ_HOST: rabbitmq
       RABBITMQ_PORT: "5672"
       RABBITMQ_USER: ${RABBITMQ_USER:-guest}
@@ -211,8 +212,12 @@ services:
       MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      # 模型路径
-      MODELS_DIR: /models
+      # LLM API（2026-08-16 决策：推理走 DeepSeek；Key 仅经 deploy/.env 注入，不入库）
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-https://api.deepseek.com}
+      LLM_API_MODEL: ${LLM_API_MODEL:-deepseek-chat}
+      # 本地 embedding 模型（bge-small-zh-v1.5，挂载于 models 卷，M4.07/M4.09）
+      MODEL_EMBED_PATH: /models/bge-small-zh-v1.5
     ports:
       - "${AI_SERVICE_PORT:-8000}:8000"
     volumes:
@@ -220,8 +225,6 @@ services:
     networks:
       - finreport-net
     depends_on:
-      redis:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       minio-init:
@@ -237,6 +240,9 @@ services:
     build:
       context: ../backend
       dockerfile: Dockerfile
+      # 同 ai-service：显式指向 runtime stage（dev 是最后一个 stage，
+      # Docker 默认会错误地构建它；M4.09 修复）。
+      target: runtime
     image: finreport/backend:latest
     container_name: finreport-backend
     restart: unless-stopped
@@ -286,6 +292,8 @@ services:
     build:
       context: ../frontend
       dockerfile: Dockerfile
+      # 同 ai-service：显式指向 runtime stage（M4.09 修复）。
+      target: runtime
       args:
         VITE_API_BASE_URL: http://localhost:8080
         VITE_SSE_BASE_URL: http://localhost:8080

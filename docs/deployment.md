@@ -17,6 +17,33 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 docker compose -f docker-compose.yml -f docker-compose.dev.yml down
 ```
 
+## LLM API 与本地模型配置（M4.09）
+
+LLM 推理走 DeepSeek 官方 API（2026-08-16 决策），本地仅保留 bge-small-zh-v1.5
+embedding（~95MB，CPU）。两项配置均不进 git：
+
+1. **LLM API Key**：复制 `deploy/.env.example` 为 `deploy/.env`，填写
+   `LLM_API_KEY`（可按需覆盖 `LLM_API_BASE_URL` / `LLM_API_MODEL`）。
+   compose 会将其注入 ai-service 容器；Key 缺失时 API 路由在首次调用时
+   fail loud，不影响服务启动与健康检查。
+2. **bge embedding 模型**：模型权重经 `finreport-models` 卷挂载到容器
+   `/models`（compose 已配置 `MODEL_EMBED_PATH=/models/bge-small-zh-v1.5`）：
+
+```powershell
+# 宿主机下载（~95MB）
+python scripts\download_models.py
+# 复制进卷（一次性；重建卷后需重新复制）
+docker cp .\models\. finreport-models:/models/
+```
+
+模型未就位时 embed() 抛 `ModelLoadException` 并提示下载命令，其余路由
+（parse/extract/check/report）不受影响。
+
+另注：base compose 自 M4.09 起为三个应用服务显式声明 `build.target:
+runtime`。此前 Docker 默认构建 Dockerfile 的最后一个 stage（dev），
+生产镜像从未包含 prod 依赖；dev overlay 以 `target: dev` 覆盖，开发
+栈行为不变。
+
 ## 服务验收
 
 | 类别 | 服务 | 期望状态 |
