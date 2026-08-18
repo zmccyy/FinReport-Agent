@@ -1,4 +1,4 @@
-"""HTTP schemas for M1 mock and M2 real document parsing."""
+"""HTTP schemas for the /parse endpoints (M1 object-key stub + M2 real upload)."""
 
 from typing import Any
 
@@ -11,11 +11,12 @@ class ParseRequest(BaseModel):
     pdf_object_key: str = Field(alias="pdfObjectKey", min_length=1)
 
 
-class MockDocument(BaseModel):
-    """Parsed-document representation.
+class DocumentSummary(BaseModel):
+    """Parsed-document summary (M2.01, 原 M1 契约).
 
-    The ``text`` and ``page_count`` fields keep the M1 mock contract intact;
-    M2 adds the optional ``extra`` payload carrying the full Document model.
+    ``/parse/upload``（真实解析）填充 ``page_count`` 与 ``extra``（完整
+    Document model）；``/parse``（object-key 存根）仅回显 ``source``，
+    保留 M1 集成测试契约（``text`` 默认值与字段形状不变）。
     """
 
     source: str
@@ -25,6 +26,6 @@ class MockDocument(BaseModel):
 
 
 class ParseResponse(BaseModel):
-    """Successful mock or real parse response."""
+    """Successful parse response (real upload or M1 object-key stub)."""
 
-    document: MockDocument
+    document: DocumentSummary

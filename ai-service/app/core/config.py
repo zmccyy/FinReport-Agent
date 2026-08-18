@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # M4.07 本地 embedding 模型路径（bge-small-zh-v1.5，CPU）。
     model_embed_path: str = "models/bge-small-zh-v1.5"
     # Inference SLA (spec §3.7 / §12.1) — M4.08 后作用于 DeepSeek API 路由。
-    model_load_timeout_seconds: int = 300
+    # （model_load_timeout_seconds 已随 GPU 栈移除：API 路由无本地加载环节。）
     model_generate_timeout_seconds: int = 60
     model_max_new_tokens: int = 1024
     # M4.02 DeepSeek API (OpenAI 兼容协议, 2026-08-16 起本地训练取消).

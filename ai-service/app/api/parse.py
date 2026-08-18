@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 
 from app.core.exceptions import AiException
 from app.modules.parser.document_parser import DocumentParser
-from app.schemas.parse import MockDocument, ParseRequest, ParseResponse
+from app.schemas.parse import DocumentSummary, ParseRequest, ParseResponse
 from app.utils.logger import get_logger
 
 LOGGER = get_logger(__name__)
@@ -37,9 +37,9 @@ async def parse_document(request: ParseRequest) -> ParseResponse:
         request: PDF object-key request.
 
     Returns:
-        A mock document that identifies the requested object.
+        A stub document that identifies the requested object.
     """
-    return ParseResponse(document=MockDocument(source=request.pdf_object_key))
+    return ParseResponse(document=DocumentSummary(source=request.pdf_object_key))
 
 
 @router.post("/parse/upload", response_model=ParseResponse)
@@ -62,7 +62,7 @@ async def parse_upload(
     document = parser.parse_bytes(pdf_bytes, source=file.filename or "upload.pdf")
     payload = document.model_dump(mode="json")
     return ParseResponse(
-        document=MockDocument(
+        document=DocumentSummary(
             source=document.source,
             page_count=document.page_count,
             text=str(payload.get("parser_version", "")),

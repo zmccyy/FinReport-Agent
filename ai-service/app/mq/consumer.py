@@ -1,4 +1,11 @@
-"""RabbitMQ task consumer for the M1 mock processing chain."""
+"""RabbitMQ task consumer for the L3 processing chain (M4 起全链路真实实现).
+
+路由：parse → parser handler；extract.{bs,is,cf} → extractor handler
+（DeepSeek json_mode 抽取）；check → reasoner handler（勾稽/异常/复核）；
+report → generator handler（报告/图表/PDF）。数据通路见 spec §4.4：
+parse 产物走 MinIO，check/report 只读 MySQL，进度经 ProgressProducer
+回报 L2。
+"""
 
 import asyncio
 from threading import Event, Thread
