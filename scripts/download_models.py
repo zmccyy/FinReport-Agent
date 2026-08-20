@@ -102,7 +102,7 @@ def download_model(key: str, source: str = "auto") -> bool:
 
     if target_dir.exists() and any(target_dir.iterdir()):
         print(f"  [跳过] 目录已存在且非空: {target_dir}")
-        print(f"  如需重新下载，请先删除该目录")
+        print("  如需重新下载，请先删除该目录")
         return True
 
     # 选择下载源
@@ -113,13 +113,13 @@ def download_model(key: str, source: str = "auto") -> bool:
     else:  # auto: 先 modelscope，失败则回退 hf
         ok = download_via_modelscope(m["modelscope_id"], target_dir)
         if not ok:
-            print(f"  [回退] ModelScope 失败，尝试 HuggingFace 镜像...")
+            print("  [回退] ModelScope 失败，尝试 HuggingFace 镜像...")
             ok = download_via_hf(m["hf_id"], target_dir)
 
     if ok:
         print(f"  [完成] {target_dir}")
     else:
-        print(f"  [失败] 请检查网络或手动下载")
+        print("  [失败] 请检查网络或手动下载")
     return ok
 
 
@@ -147,17 +147,20 @@ def list_models():
     print("  docker cp ./models/. finreport-models:/models/")
 
 
-def check_dependencies():
-    """检查并提示安装下载依赖"""
+def check_dependencies(source: str = "auto") -> bool:
+    """检查并提示安装下载依赖（按 source 只检查实际需要的客户端）。"""
+    needed = []
+    if source in ("auto", "modelscope"):
+        needed.append("modelscope")
+    if source in ("auto", "hf"):
+        needed.append("huggingface_hub")
+
     missing = []
-    try:
-        import modelscope  # noqa: F401
-    except ImportError:
-        missing.append("modelscope")
-    try:
-        import huggingface_hub  # noqa: F401
-    except ImportError:
-        missing.append("huggingface_hub")
+    for pkg in needed:
+        try:
+            __import__(pkg)
+        except ImportError:
+            missing.append(pkg)
 
     if missing:
         print("\n[提示] 以下依赖未安装:")
@@ -199,8 +202,8 @@ def main():
     # M4.09：仅剩 bge 一个模型，无参数默认下载全部（即 bge）。
     keys = [args.model] if args.model else list(MODELS.keys())
 
-    # 检查依赖
-    if not check_dependencies():
+    # 检查依赖（按下载源检查实际需要的客户端）
+    if not check_dependencies(args.source):
         sys.exit(1)
 
     total_gb = sum(MODELS[k]["size_gb"] for k in keys)
