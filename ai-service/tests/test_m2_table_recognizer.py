@@ -147,6 +147,65 @@ def test_engine_is_built_only_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(built_calls) == 1
 
 
+def test_engine_omits_use_gpu_kwarg_for_ppstructurev3(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """PPStructureV3 must not receive use_gpu（PaddleOCR 3.x 拒绝未知参数）。
+
+    回归测试（M4.10）：真实 paddleocr 3.7 的 ``parse_common_args`` 对
+    ``use_gpu`` 抛 ``ValueError: Unknown argument``——此前单测用注入引擎，
+    构造参数从未被真实校验，导致该 bug 潜伏到首次真实推理才暴露。
+    """
+
+    received_kwargs: dict[str, Any] = {}
+
+    class _StrictPPV3:
+        """Mimics PaddleOCR 3.x: rejects unknown kwargs like the real one."""
+
+        #: paddleocr 3.7 PPStructureV3 构造器接受的与本项目相关的参数集。
+        KNOWN_KWARGS = {
+            "lang",
+            "device",
+            "model_dir",
+            "enable_mkldnn",
+            "ocr_version",
+            "layout_detection_model_name",
+            "use_doc_orientation_classify",
+            "use_doc_unwarping",
+            "use_textline_orientation",
+            "use_seal_recognition",
+            "use_formula_recognition",
+            "use_chart_recognition",
+        }
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            unknown = set(kwargs) - self.KNOWN_KWARGS
+            if unknown:
+                raise ValueError(f"Unknown argument: {sorted(unknown)[0]}")
+            received_kwargs.update(kwargs)
+
+        def predict(self, image: Any) -> list:
+            del image
+            return []
+
+    import sys
+    import types
+
+    module = types.ModuleType("paddleocr")
+    module.PPStructureV3 = _StrictPPV3  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "paddleocr", module)
+
+    recognizer = TableRecognizer()
+    recognizer.analyze_page(0, b"PNG")
+
+    assert "use_gpu" not in received_kwargs
+    assert received_kwargs.get("lang") == "ch"
+    # M4.10 OOM 修复：默认轻量 OCR/版面模型（v5 服务端组合 8GB VM 必 OOM，
+    # 见 TableRecognizer.__init__ 注释；此处锁定默认值不回归为重模型）。
+    assert received_kwargs.get("ocr_version") == "PP-OCRv4"
+    assert received_kwargs.get("layout_detection_model_name") == "PP-DocLayout-L"
+
+
 def test_ppstructurev3_engine_maps_table_regions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

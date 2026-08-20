@@ -7,6 +7,7 @@ from app.modules.parser.document_parser import (
     DocumentParser,
     LayoutAnalyzer,
     OcrProvider,
+    StatementPageFilter,
 )
 from app.modules.parser.ocr_fallback import OcrFallback
 from app.modules.parser.table_recognizer import TableRecognizer
@@ -41,12 +42,26 @@ def create_document_parser(
     runtime_settings = settings or Settings()
     analyzer = layout_analyzer
     if analyzer is None and enable_table_recognition:
-        analyzer = TableRecognizer(use_gpu=False)
+        analyzer = TableRecognizer(
+            use_gpu=False, enable_mkldnn=runtime_settings.parser_enable_mkldnn
+        )
     ocr = ocr_provider
     if ocr is None and enable_ocr:
-        ocr = OcrFallback(use_gpu=False)
+        ocr = OcrFallback(
+            use_gpu=False, enable_mkldnn=runtime_settings.parser_enable_mkldnn
+        )
+    # M4.10 报表页过滤：锚点正则为空串时关闭过滤（全页识别，测试退路）。
+    table_page_filter = None
+    if runtime_settings.parser_table_anchor_pattern.strip():
+        table_page_filter = StatementPageFilter(
+            window=runtime_settings.parser_table_anchor_window,
+            amount_threshold=runtime_settings.parser_table_amount_threshold,
+            anchor_pattern=runtime_settings.parser_table_anchor_pattern,
+        )
     return DocumentParser(
         settings=runtime_settings,
         layout_analyzer=analyzer,
         ocr_provider=ocr,
+        table_page_filter=table_page_filter,
+        render_dpi=runtime_settings.parser_render_dpi,
     )

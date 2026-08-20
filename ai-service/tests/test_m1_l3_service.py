@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -62,6 +63,33 @@ class FakeProducer:
     def publish_progress(self, message: dict[str, Any], trace_id: str) -> None:
         """Record a progress message."""
         self.messages.append((message, trace_id))
+
+
+class FakeConnection:
+    """Simulates the pika connection for threadsafe ack scheduling."""
+
+    is_open = True
+
+    def add_callback_threadsafe(self, callback: Any) -> None:
+        """Execute the scheduled channel operation synchronously."""
+        callback()
+
+
+def _run_queued_delivery(consumer: TaskConsumer) -> None:
+    """Execute the single queued delivery to its terminal progress.
+
+    M4.10 双线程模型：``on_message`` 只负责校验 + 入队，handler 与 ack
+    由工作线程执行。单测将队列中的唯一投递取出、内联执行 ``_process``
+    （配假 connection 同步调度 ack），使断言可见终态进度与 ack。
+    """
+    consumer.connection = FakeConnection()
+    consumer._loop = asyncio.new_event_loop()
+    channel, method, task, step_name, trace_id = consumer._work_queue.get_nowait()
+    try:
+        consumer._process(channel, method, task, step_name, trace_id)
+    finally:
+        consumer._loop.close()
+        consumer._loop = None
 
 
 class _InlineObjectStore:
@@ -167,6 +195,7 @@ def test_task_consumer_acknowledges_after_success_and_preserves_trace_id(
         FakeProperties({"traceId": "trace-abc"}),
         build_message(),
     )
+    _run_queued_delivery(consumer)
 
     assert channel.acks == [17]
     assert channel.nacks == []
@@ -196,6 +225,7 @@ def test_task_consumer_reports_handler_failure_before_acknowledging_delivery() -
         FakeProperties({"traceId": "trace-def"}),
         build_message(),
     )
+    _run_queued_delivery(consumer)
 
     assert channel.acks == [18]
     assert channel.nacks == []
@@ -225,6 +255,7 @@ def test_task_consumer_nacks_when_progress_publication_is_unconfirmed() -> None:
         FakeProperties({"traceId": "trace-publish-failure"}),
         build_message(),
     )
+    _run_queued_delivery(consumer)
 
     assert channel.acks == []
     assert channel.nacks == [(19, False)]

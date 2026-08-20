@@ -363,6 +363,7 @@ def extract_with_retry(
     report_period: str = "",
     company_code: str = "",
     unit: str = "元",
+    scope: str = "",
     max_new_tokens: int | None = None,
     timeout_seconds: float | None = None,
     retry_temperature: float = 0.1,
@@ -408,6 +409,7 @@ def extract_with_retry(
         report_period=report_period,
         company_code=company_code,
         unit=unit,
+        scope=scope,
         max_new_tokens=max_new_tokens,
         timeout_seconds=timeout_seconds,
     )
@@ -437,6 +439,7 @@ def extract_with_retry(
         report_period=report_period,
         company_code=company_code,
         unit=unit,
+        scope=scope,
     )
     retry_prompt = build_retry_prompt(
         original_prompt,

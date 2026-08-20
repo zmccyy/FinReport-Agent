@@ -8,6 +8,7 @@ parse 产物走 MinIO，check/report 只读 MySQL，进度经 ProgressProducer
 """
 
 import asyncio
+import queue
 from threading import Event, Thread
 from typing import Any, Awaitable, Callable
 
@@ -40,6 +41,8 @@ STEP_PROGRESS = {
     "REPORT": 100,
 }
 Handler = Callable[[TaskMessage], Awaitable[dict[str, Any]]]
+#: 消费者 I/O 线程转交工作线程的一条已验证投递。
+WorkItem = tuple[Any, Any, TaskMessage, str, str]
 
 
 class TaskConsumer:
@@ -65,7 +68,13 @@ class TaskConsumer:
         self.stop_event = Event()
         self.thread: Thread | None = None
         self.connection: Any | None = None
-        # 消费线程内复用的事件循环——避免每条消息 asyncio.run() 反复
+        # 工作线程队列：I/O 线程只负责收包/心跳/ack，handler 转交工作线程
+        # 执行（M4.10 修复：parse 单条 handler 可阻塞 >7min，若在 I/O 线程
+        # 同步执行，30s heartbeat 停发 → broker 断连 → ack 丢失 → 消息无限
+        # 重投；拆线程后心跳持续流动）。
+        self._work_queue: queue.Queue[WorkItem] = queue.Queue()
+        self._worker_thread: Thread | None = None
+        # 工作线程内复用的事件循环——避免每条消息 asyncio.run() 反复
         # 创建/销毁 loop（含 to_thread 线程池无法跨消息复用）。
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -78,14 +87,23 @@ class TaskConsumer:
         channel.basic_qos(prefetch_count=PREFETCH_COUNT)
 
     def start(self) -> None:
-        """Start the broker loop on a daemon thread when enabled."""
+        """Start the broker loop and worker thread when enabled."""
         if not self.settings.mq_consumer_enabled or self.thread is not None:
             return
+        self._worker_thread = Thread(
+            target=self._process_loop, name="finreport-mq-worker", daemon=True
+        )
+        self._worker_thread.start()
         self.thread = Thread(target=self._consume, name="finreport-mq-consumer", daemon=True)
         self.thread.start()
 
     def _consume(self) -> None:
-        """Reconnect and consume all M1 task queues until shutdown."""
+        """Reconnect and consume all M1 task queues until shutdown.
+
+        This thread only pumps AMQP I/O (heartbeats included). Handlers run on
+        the worker thread so a long parse never starves heartbeats; see
+        ``_process_loop``.
+        """
         import pika
 
         credentials = pika.PlainCredentials(
@@ -100,8 +118,6 @@ class TaskConsumer:
         )
         while not self.stop_event.is_set():
             try:
-                if self._loop is None:
-                    self._loop = asyncio.new_event_loop()
                 self.connection = pika.BlockingConnection(parameters)
                 channel = self.connection.channel()
                 self.configure_channel(channel)
@@ -121,44 +137,47 @@ class TaskConsumer:
                     self.connection.close()
                 self.connection = None
 
-        if self._loop is not None:
+    def _process_loop(self) -> None:
+        """Worker thread: execute validated deliveries with a reused event loop.
+
+        Runs until shutdown; each queued item executes its handler to terminal
+        progress, then schedules the acknowledgement back onto the consumer
+        I/O thread via ``add_callback_threadsafe``.
+        """
+        self._loop = asyncio.new_event_loop()
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    item = self._work_queue.get(timeout=1)
+                except queue.Empty:
+                    continue
+                channel, method, task, step_name, trace_id = item
+                self._process(channel, method, task, step_name, trace_id)
+        finally:
             self._loop.close()
             self._loop = None
 
-    def on_message(self, channel: Any, method: Any, properties: Any, body: bytes) -> None:
-        """Process one delivery and acknowledge it only after its terminal progress is durable.
-
-        Malformed deliveries cannot be correlated safely and therefore go directly to the DLQ.
-        Handler failures are correlated task failures: they first publish a durable ``FAILED``
-        progress event so L2 can retry or terminally fail the task, then acknowledge the input.
+    def _process(
+        self,
+        channel: Any,
+        method: Any,
+        task: TaskMessage,
+        step_name: str,
+        trace_id: str,
+    ) -> None:
+        """Run one validated delivery to terminal progress and schedule its ack.
 
         Args:
-            channel: Pika channel used for acknowledgement.
-            method: Delivery metadata containing routing key and tag.
-            properties: AMQP properties containing traceId.
-            body: Serialized task JSON.
+            channel: Consumer channel the delivery arrived on (ack target).
+            method: Delivery metadata (routing key, delivery tag).
+            task: Validated input task.
+            step_name: L2 step name (e.g. ``PARSE``).
+            trace_id: Correlation identifier from delivery headers.
         """
-        trace_id = str((getattr(properties, "headers", None) or {}).get("traceId", ""))
+        handler = self.handlers[method.routing_key]
+        assert self._loop is not None
         try:
-            task = TaskMessage.model_validate_json(body)
-            handler = self.handlers.get(method.routing_key)
-            if handler is None:
-                raise ValueError(f"Unsupported routing key: {method.routing_key}")
-            if task.step != method.routing_key:
-                raise ValueError("Message step does not match delivery routing key")
-            step_name = STEP_NAMES[task.step]
-        except Exception:
-            LOGGER.exception("Invalid task delivery routingKey=%s", method.routing_key)
-            channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-            return
-
-        try:
-            # 复用消费线程的事件循环（on_message 与 _consume 同线程）。
-            loop = self._loop
-            if loop is None or loop.is_closed():
-                loop = asyncio.new_event_loop()
-                self._loop = loop
-            result = loop.run_until_complete(handler(task))
+            result = self._loop.run_until_complete(handler(task))
         except Exception as error:
             LOGGER.exception("Task handler failed routingKey=%s", method.routing_key)
             try:
@@ -174,21 +193,89 @@ class TaskConsumer:
                     "Failed to publish task failure progress routingKey=%s",
                     method.routing_key,
                 )
-                channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+                self._nack_threadsafe(channel, method.delivery_tag)
                 return
-            channel.basic_ack(delivery_tag=method.delivery_tag)
-            return
+        else:
+            try:
+                self._publish_progress(task, step_name, "SUCCESS", result, trace_id)
+            except Exception:
+                LOGGER.exception(
+                    "Failed to publish task success progress routingKey=%s",
+                    method.routing_key,
+                )
+                self._nack_threadsafe(channel, method.delivery_tag)
+                return
+        self._ack_threadsafe(channel, method.delivery_tag)
 
+    def on_message(self, channel: Any, method: Any, properties: Any, body: bytes) -> None:
+        """Validate one delivery and hand it to the worker thread.
+
+        Malformed deliveries cannot be correlated safely and therefore go directly to the DLQ.
+        Valid deliveries are enqueued for ``_process``; the I/O thread stays free to pump
+        heartbeats during long handlers.
+
+        Args:
+            channel: Pika channel used for acknowledgement.
+            method: Delivery metadata containing routing key and tag.
+            properties: AMQP properties containing traceId.
+            body: Serialized task JSON.
+        """
+        trace_id = str((getattr(properties, "headers", None) or {}).get("traceId", ""))
         try:
-            self._publish_progress(task, step_name, "SUCCESS", result, trace_id)
+            task = TaskMessage.model_validate_json(body)
+            if method.routing_key not in self.handlers:
+                raise ValueError(f"Unsupported routing key: {method.routing_key}")
+            if task.step != method.routing_key:
+                raise ValueError("Message step does not match delivery routing key")
+            step_name = STEP_NAMES[task.step]
         except Exception:
-            LOGGER.exception(
-                "Failed to publish task success progress routingKey=%s",
-                method.routing_key,
-            )
+            LOGGER.exception("Invalid task delivery routingKey=%s", method.routing_key)
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return
-        channel.basic_ack(delivery_tag=method.delivery_tag)
+        self._work_queue.put((channel, method, task, step_name, trace_id))
+
+    def _ack_threadsafe(self, channel: Any, delivery_tag: Any) -> None:
+        """Schedule ``basic_ack`` on the consumer I/O thread.
+
+        Pika channels are not thread-safe; the callback runs inside the I/O
+        thread's next ``process_data_events`` cycle. When the connection has
+        died in the meantime, the broker redelivers the message and the task
+        is reprocessed — progress idempotency keys make that safe.
+        """
+        self._schedule_threadsafe(channel, lambda: channel.basic_ack(delivery_tag=delivery_tag))
+
+    def _nack_threadsafe(self, channel: Any, delivery_tag: Any) -> None:
+        """Schedule ``basic_nack(requeue=False)`` (DLQ routing) on the I/O thread."""
+        self._schedule_threadsafe(
+            channel, lambda: channel.basic_nack(delivery_tag=delivery_tag, requeue=False)
+        )
+
+    def _schedule_threadsafe(self, channel: Any, operation: Callable[[], Any]) -> None:
+        """Run ``operation`` on the consumer I/O thread, swallowing late failures.
+
+        Args:
+            channel: The channel whose lifetime guards the operation.
+            operation: A zero-argument callback issuing one channel operation.
+        """
+        connection = self.connection
+        if connection is None or not connection.is_open:
+            LOGGER.warning(
+                "Broker connection lost before ack; delivery will be redelivered"
+            )
+            return
+
+        def guarded() -> None:
+            try:
+                operation()
+            except Exception:
+                LOGGER.warning(
+                    "Channel operation failed after reconnect; delivery will be redelivered"
+                )
+
+        try:
+            connection.add_callback_threadsafe(guarded)
+        except Exception:
+            LOGGER.warning("Could not schedule channel operation; delivery will be redelivered")
 
     def _publish_progress(
         self,
@@ -226,4 +313,6 @@ class TaskConsumer:
             self.connection.add_callback_threadsafe(self.connection.close)
         if self.thread is not None:
             self.thread.join(timeout=5)
+        if self._worker_thread is not None:
+            self._worker_thread.join(timeout=5)
         self.producer.close()

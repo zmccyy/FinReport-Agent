@@ -108,6 +108,7 @@ class OcrFallback:
         self,
         lang: str = "ch",
         use_gpu: bool = False,
+        enable_mkldnn: bool = False,
         engine: Any | None = None,
     ) -> None:
         """Configure the OCR provider.
@@ -115,10 +116,14 @@ class OcrFallback:
         Args:
             lang: PaddleOCR language flag (defaults to Chinese).
             use_gpu: Whether PaddleOCR may use the GPU.
+            enable_mkldnn: Paddle oneDNN(MKLDNN) 开关，默认关闭（同
+                TableRecognizer——paddlepaddle 3.3.1 oneDNN 算子兼容问题，
+                M4.10 真实 E2E 发现）。
             engine: Optional pre-built engine for tests (callable or instance).
         """
         self.lang = lang
         self.use_gpu = use_gpu
+        self.enable_mkldnn = enable_mkldnn
         self._engine = engine
         self._initialized = engine is not None
 
@@ -208,14 +213,19 @@ class OcrFallback:
         except ImportError as error:
             raise AiException("PaddleOCR is required for OcrFallback") from error
         LOGGER.info(
-            "Initializing PaddleOCR engine lang=%s gpu=%s", self.lang, self.use_gpu
+            "Initializing PaddleOCR engine lang=%s gpu=%s mkldnn=%s",
+            self.lang,
+            self.use_gpu,
+            self.enable_mkldnn,
         )
         try:
             engine = PaddleOCR(use_angle_cls=True, lang=self.lang, use_gpu=self.use_gpu)
-        except TypeError:
-            # PaddleOCR 3.x removed the 2.x kwargs; build with the defaults.
+        except (TypeError, ValueError):
+            # PaddleOCR 3.x removed the 2.x kwargs（use_gpu 在 3.x 会抛
+            # ValueError: Unknown argument，与 TypeError 一并兜底）；
+            # enable_mkldnn 同为 3.x 参数，2.x 无此参由本分支自然回退。
             LOGGER.warning("Falling back to PaddleOCR 3.x default constructor")
-            engine = PaddleOCR(lang=self.lang)
+            engine = PaddleOCR(lang=self.lang, enable_mkldnn=self.enable_mkldnn)
         self._engine = _PaddleOCREngine(engine)
         self._initialized = True
         return self._engine

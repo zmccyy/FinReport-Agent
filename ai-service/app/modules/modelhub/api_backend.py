@@ -248,12 +248,22 @@ class DeepSeekBackend:
         """
         try:
             data = response.json()
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            content = choice["message"]["content"]
             usage = data.get("usage") or {}
         except (ValueError, KeyError, IndexError, TypeError) as error:
             raise AiException(
                 f"DeepSeek API returned malformed body: {response.text[:200]}"
             ) from error
+        if not content and choice.get("finish_reason") == "length":
+            # reasoning 模型（deepseek-v4-flash 等）会把 max_tokens 预算
+            # 先花在 reasoning_content 上，content 为空即预算耗尽截断
+            # （M4.10 实测 1024 上限时三表抽取全部命中此路径）。
+            raise AiException(
+                "DeepSeek API output truncated: content empty with "
+                "finish_reason=length (reasoning consumed the token budget; "
+                "raise model_max_new_tokens)"
+            )
         return GenerateResult(
             text=content,
             prompt_tokens=int(usage.get("prompt_tokens", 0)),

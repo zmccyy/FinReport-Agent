@@ -47,6 +47,23 @@ def text_pdf_bytes() -> bytes:
 
 
 @pytest.fixture
+def keyword_pdf_bytes() -> bytes:
+    """A three-page PDF where pages 0/2 hit a candidate keyword and 1 does not.
+
+    Backs the M4.10 table-recognition candidate-page filter tests (ASCII
+    keyword for the same CJK-font-independence reason as text_pdf_bytes).
+    """
+    return _make_pdf(
+        Path("unused"),
+        [
+            "BALANCE SHEET section 1,234.56 2,345.67",
+            "Notes to the financial statements",
+            "More BALANCE SHEET 3,456.78 4,567.89",
+        ],
+    )
+
+
+@pytest.fixture
 def scanned_pdf_bytes() -> bytes:
     """A single-page scan-like PDF with no extractable text layer."""
     return _make_pdf(Path("unused"), [""], scanned=True)

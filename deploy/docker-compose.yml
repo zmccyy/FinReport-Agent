@@ -191,6 +191,14 @@ services:
       # stage（此处为 dev），M1 以来生产镜像从未包含 prod 依赖（M4.09 修复）。
       # dev overlay 用 target: dev 覆盖此值。
       target: runtime
+      # 受限网络构建加速（默认官方源；在 deploy/.env 按机器覆盖，
+      # 样例见 .env.example「构建镜像加速」段）。
+      args:
+        APT_MIRROR: ${APT_MIRROR:-}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+        TORCH_SPEC: ${TORCH_SPEC:-torch}
+        TORCH_INSTALL_ARGS: ${TORCH_INSTALL_ARGS:---index-url https://download.pytorch.org/whl/cpu}
+        NUMPY_PIN: ${NUMPY_PIN:-numpy}
     image: finreport/ai-service:latest
     container_name: finreport-ai-service
     restart: unless-stopped
@@ -218,10 +226,16 @@ services:
       LLM_API_MODEL: ${LLM_API_MODEL:-deepseek-chat}
       # 本地 embedding 模型（bge-small-zh-v1.5，挂载于 models 卷，M4.07/M4.09）
       MODEL_EMBED_PATH: /models/bge-small-zh-v1.5
+      # M4.10 表格识别页面渲染 DPI（默认 200；内存受限环境可降 150，
+      # 见 ai-service config.py parser_render_dpi 注释）
+      PARSER_RENDER_DPI: ${PARSER_RENDER_DPI:-200}
     ports:
       - "${AI_SERVICE_PORT:-8000}:8000"
     volumes:
       - models:/models:ro
+      # PP-Structure 推理模型运行时缓存（首次用表格式识别时从 bcebos
+      # 下载 ~300MB 到 HOME 下；挂卷避免容器重启重复下载）。
+      - paddle_cache:/home/finreport
     networks:
       - finreport-net
     depends_on:
@@ -249,6 +263,11 @@ services:
     environment:
       JAVA_OPTS: "-Xms256m -Xmx512m"
       SPRING_PROFILES_ACTIVE: docker
+      # JWT 签名密钥。application.yml docker profile 无内置默认值（生产
+      # 必须显式注入），缺省会令 JwtUtil 构造抛 WeakKeyException 重启循环
+      # （M4.10 base compose E2E 实测；此前只有 dev overlay 注入，base
+      # compose 单独跑 backend 必崩）。deploy/.env 可覆盖为正式密钥。
+      JWT_SECRET: ${JWT_SECRET:-finreport-dev-jwt-secret-must-be-at-least-32-characters}
       # 基础设施连接
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"
@@ -335,6 +354,9 @@ volumes:
     name: finreport-models
     # 模型权重卷 — 使用 docker compose 管理
     # 将模型文件复制到卷中：docker cp ./models/. finreport-models:/models/
+  paddle_cache:
+    name: finreport-paddle-cache
+    # PP-Structure 推理模型运行时缓存（ai-service HOME，M4.10）
 
 # ================================================================================
 # 网络

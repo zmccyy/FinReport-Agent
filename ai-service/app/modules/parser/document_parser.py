@@ -9,6 +9,7 @@ without pulling in the heavyweight Paddle stack.
 from __future__ import annotations
 
 import io
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -26,6 +27,68 @@ from app.utils.logger import get_logger
 LOGGER = get_logger(__name__)
 
 DEFAULT_RENDER_DPI = 200
+
+# A 股年报报表页锚点：合并/母公司 三表标题（M4.10）。
+_STATEMENT_ANCHOR_RE = re.compile(r"(合并|母公司)(资产负债表|利润表|现金流量表)")
+# 金额格式（千分位 + 两位小数），用于报表页密度门控。
+_AMOUNT_CELL_RE = re.compile(r"\d{1,3}(?:,\d{3})+\.\d{2}")
+
+
+class StatementPageFilter:
+    """A 股年报「报表页」判定：标题锚点 + 向后窗口 + 金额密度门控。
+
+    背景（M4.10 真实 E2E 实测）：PP-StructureV3 逐页跑 143 页年报不可行
+    （>18min）；纯关键词过滤仍命中 23 页且包含附注密集表格页——RT-DETR-L
+    单元格检测在附注多表页上内存膨胀，直接把 7.6GB 的 Docker VM 打到
+    OOM（容器 28 次重启循环）。
+
+    判定规则（有状态，按页序单遍执行）：
+
+    1. 页文本命中锚点正则（如「合并资产负债表」）→ 记为锚点页；
+    2. 锚点页及其后 ``window`` 页内、金额格式单元格数 ≥ ``amount_threshold``
+       的页判为报表页（报表续页无标题但金额密集；附注页因距锚点超过
+       窗口或密度不足被排除）。
+
+    茅台 2025 年报实测：锚点 55/58/60/62/63/65 → 候选 55-68 共 14 页，
+    恰好覆盖 合并/母公司 三表及其续页。
+    """
+
+    def __init__(
+        self,
+        window: int = 4,
+        amount_threshold: int = 15,
+        anchor_pattern: str | None = None,
+    ) -> None:
+        """Configure the filter.
+
+        Args:
+            window: 锚点页向后覆盖的页数（报表含续页，默认 4）。
+            amount_threshold: 金额单元格数下限（低于视为非报表页）。
+            anchor_pattern: 自定义锚点正则（默认 A 股年报三表标题）。
+        """
+        self.window = window
+        self.amount_threshold = amount_threshold
+        self._anchor_re = (
+            re.compile(anchor_pattern) if anchor_pattern else _STATEMENT_ANCHOR_RE
+        )
+        self._last_anchor = -10_000
+
+    def is_candidate(self, page_index: int, page_text: str) -> bool:
+        """Decide whether table recognition should run on this page.
+
+        Args:
+            page_index: 0-based page index (for the anchor window).
+            page_text: The page's raw text layer.
+
+        Returns:
+            True when the page is inside an anchor window and passes the
+            amount-density gate.
+        """
+        if self._anchor_re.search(page_text):
+            self._last_anchor = page_index
+        if not (0 <= page_index - self._last_anchor <= self.window):
+            return False
+        return len(_AMOUNT_CELL_RE.findall(page_text)) >= self.amount_threshold
 
 
 class LayoutAnalyzer(Protocol):
@@ -86,6 +149,7 @@ class DocumentParser:
         layout_analyzer: LayoutAnalyzer | None = None,
         ocr_provider: OcrProvider | None = None,
         render_dpi: int = DEFAULT_RENDER_DPI,
+        table_page_filter: StatementPageFilter | None = None,
     ) -> None:
         """Configure the parser with optional layout/OCR providers.
 
@@ -94,11 +158,16 @@ class DocumentParser:
             layout_analyzer: PP-Structure-backed table region detector.
             ocr_provider: PaddleOCR-based scanned-page recognizer.
             render_dpi: DPI used when rasterizing pages for layout/OCR.
+            table_page_filter: 报表页过滤器——非 None 时仅对判为报表页的
+                页调用 layout_analyzer（PP-Structure 全页跑 143 页年报
+                >18min 且附注密集页 OOM，见 StatementPageFilter 文档；
+                None = 不过滤，旧行为，测试用）。
         """
         self.settings = settings or Settings()
         self.layout_analyzer = layout_analyzer
         self.ocr_provider = ocr_provider
         self.render_dpi = render_dpi
+        self.table_page_filter = table_page_filter
 
     def parse_bytes(self, pdf_bytes: bytes, source: str) -> Document:
         """Parse a PDF byte stream into a Document.
@@ -210,7 +279,11 @@ class DocumentParser:
         ocr_applied = False
 
         table_blocks: list[TableBlock] = []
-        if self.layout_analyzer is not None and raw.image_bytes is not None:
+        if (
+            self.layout_analyzer is not None
+            and raw.image_bytes is not None
+            and self._is_table_candidate(raw.index, raw.text)
+        ):
             try:
                 table_blocks = self.layout_analyzer.analyze_page(
                     raw.index, raw.image_bytes
@@ -283,6 +356,21 @@ class DocumentParser:
         if text_blocks:
             return False
         return not raw.text.strip()
+
+    def _is_table_candidate(self, page_index: int, page_text: str) -> bool:
+        """Check whether table recognition should run on this page.
+
+        Args:
+            page_index: 0-based page index (anchor window bookkeeping).
+            page_text: The page's raw text layer.
+
+        Returns:
+            True when no filter is configured (legacy behavior) or the page
+            passes the statement-page filter.
+        """
+        if self.table_page_filter is None:
+            return True
+        return self.table_page_filter.is_candidate(page_index, page_text)
 
     @staticmethod
     def _import_fitz() -> Any:

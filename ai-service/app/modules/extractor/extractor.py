@@ -83,6 +83,7 @@ class Extractor:
         report_period: str = "",
         company_code: str = "",
         unit: str = "元",
+        scope: str = "",
         max_new_tokens: int | None = None,
         temperature: float | None = None,
         timeout_seconds: float | None = None,
@@ -98,6 +99,8 @@ class Extractor:
             report_period: Optional ``YYYY-MM-DD`` report end date.
             company_code: Optional A-share ticker.
             unit: Unit hint for the value field.
+            scope: Consolidation scope hint (``合并``/``母公司``) injected
+                into the prompt so model output scope matches the table.
             max_new_tokens: Override default max tokens.
             temperature: Override default temperature.
             timeout_seconds: Override default SLA timeout.
@@ -120,6 +123,7 @@ class Extractor:
             report_period=report_period,
             company_code=company_code,
             unit=unit,
+            scope=scope,
         )
         gen_result = self.hub.generate(
             prompt,

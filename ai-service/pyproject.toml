@@ -30,6 +30,19 @@ prod = [
     "pymupdf>=1.24",         # PDF 解析
     "paddlepaddle>=2.6",    # PaddleOCR 推理后端（CPU 版；GPU 见 spec §4.7）
     "paddleocr>=2.7",        # PP-Structure 表格还原 + PaddleOCR 兜底
+    # paddlex 的 PP-StructureV3 管线在构造时强制校验 ocr extra 依赖集
+    # （paddlex/utils/deps.py require_extra），缺任一包直接 DependencyError，
+    # 表格识别静默退化（M4.10 真实 E2E 首跑暴露；单测 mock 引擎无法发现）。
+    # pip install paddleocr 不带 extras，以下需显式声明：
+    "beautifulsoup4>=4.12",
+    "einops>=0.7",
+    "ftfy>=6.1",
+    "latex2mathml>=3.3",
+    "lxml>=5.0",
+    "openpyxl>=3.1",
+    "premailer>=3.10",
+    "sentencepiece>=0.1.99",
+    "tiktoken>=0.5",
     "python-multipart>=0.0.6",  # /parse/upload 端点
     "httpx>=0.27",           # Async HTTP client
     "PyMySQL>=1.1",          # M4.05 L3 只读 MySQL（check 数据通路查询侧）

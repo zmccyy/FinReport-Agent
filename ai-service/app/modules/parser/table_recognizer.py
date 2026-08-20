@@ -186,17 +186,37 @@ class TableRecognizer:
     """Detect tables on a rendered page and restore them to HTML."""
 
     def __init__(
-        self, lang: str = "ch", use_gpu: bool = False, engine: Any | None = None
+        self,
+        lang: str = "ch",
+        use_gpu: bool = False,
+        enable_mkldnn: bool = False,
+        ocr_version: str = "PP-OCRv4",
+        layout_detection_model_name: str = "PP-DocLayout-L",
+        engine: Any | None = None,
     ) -> None:
         """Configure the recognizer.
 
         Args:
             lang: PP-Structure language flag (defaults to Chinese).
             use_gpu: Whether PP-Structure may use the GPU (default off for OCR).
+            enable_mkldnn: Paddle oneDNN(MKLDNN) 加速开关，默认关闭——
+                paddlepaddle 3.3.1 在部分 CPU 上经 oneDNN 执行检测模型抛
+                ``ConvertPirAttribute2RuntimeAttribute not support``（M4.10
+                真实 E2E 发现），关闭后走原生 kernel。
+            ocr_version: PP-Structure 管线 OCR 模型代（默认 PP-OCRv4 移动端
+                模型）。PP-OCRv5 服务端模型单页推理内存尖峰 >5GB，在 8GB
+                Docker VM 上被 OOM kill（M4.10 实测 7.2GB 峰值）；v4 移动端
+                模型峰值 ~2.5GB 且更快，A 股年报印刷体识别质量无显著差异。
+            layout_detection_model_name: 版面检测模型（默认 PP-DocLayout-L）。
+                PP-DocLayout_plus-L 是 RT-DETR-L 级大模型，单页推理内存
+                与耗时显著更高（同上实测）；标准版面 L 足够财报页表格定位。
             engine: Optional pre-built engine for tests (callable or instance).
         """
         self.lang = lang
         self.use_gpu = use_gpu
+        self.enable_mkldnn = enable_mkldnn
+        self.ocr_version = ocr_version
+        self.layout_detection_model_name = layout_detection_model_name
         self._engine = engine
         self._initialized = engine is not None
 
@@ -267,7 +287,9 @@ class TableRecognizer:
         """Lazily build the PP-Structure engine on first use.
 
         Prefers the current PaddleOCR 3.x ``PPStructureV3`` and falls back to
-        the legacy ``PPStructure`` callable when present.
+        the legacy ``PPStructure`` callable when present. PaddleOCR 3.x removed
+        the ``use_gpu`` kwarg（CPU 版 paddle 无 GPU 语义，参数传了会直接
+        ``ValueError: Unknown argument``，M4.10 真实推理冒烟时发现）。
 
         Returns:
             A callable engine accepting PNG bytes and returning region dicts.
@@ -288,9 +310,28 @@ class TableRecognizer:
                 ) from error
             return PPStructure(show_log=False, use_gpu=self.use_gpu, lang=self.lang)
         LOGGER.info(
-            "Initializing PPStructureV3 engine lang=%s gpu=%s", self.lang, self.use_gpu
+            "Initializing PPStructureV3 engine lang=%s mkldnn=%s",
+            self.lang,
+            self.enable_mkldnn,
         )
-        engine = PPStructureV3(lang=self.lang, use_gpu=self.use_gpu)
+        # 精简子模块（M4.10 实测）：默认 PPStructureV3 还加载公式识别
+        # （PP-FormulaNet-L）/图表识别/印章识别/文档矫正等模型，23 个候选页
+        # 跑 >10min（SLA 90s 不可达）。财报表格只需 文本 OCR + 表格还原，
+        # 关闭无关子模块后单页耗时约降一个量级。
+        # 默认 PP-OCRv4 移动端 OCR + PP-DocLayout-L 版面检测（见 __init__）
+        # ——PP-OCRv5 服务端组合单页推理内存尖峰 >5GB，8GB VM 必 OOM。
+        engine = PPStructureV3(
+            lang=self.lang,
+            enable_mkldnn=self.enable_mkldnn,
+            ocr_version=self.ocr_version,
+            layout_detection_model_name=self.layout_detection_model_name,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_textline_orientation=False,
+            use_seal_recognition=False,
+            use_formula_recognition=False,
+            use_chart_recognition=False,
+        )
         self._engine = _PPStructureV3Engine(engine)
         self._initialized = True
         return self._engine

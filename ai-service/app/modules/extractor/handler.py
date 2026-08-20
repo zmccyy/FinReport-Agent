@@ -76,6 +76,45 @@ _REPORT_TYPE_SUFFIX = {
 }
 _REPORT_TITLE_RE = re.compile(r"(20\d{2})\s*年.*?(第[一二三]季度报告|半年度报告|年度报告)")
 
+# 报表类型 → 页级合并/母公司报表标题（定位报表段区间）。
+_MERGED_TITLES: dict[str, str] = {
+    "balance_sheet": "合并资产负债表",
+    "income_statement": "合并利润表",
+    "cash_flow": "合并现金流量表",
+}
+_PARENT_TITLES: dict[str, str] = {
+    "balance_sheet": "母公司资产负债表",
+    "income_statement": "母公司利润表",
+    "cash_flow": "母公司现金流量表",
+}
+# 文本降级表格重建：取值正则（科目行中的金额）。
+_NUM_VALUE_RE = re.compile(r"(-?\d[\d,]*\.\d{2})")
+
+# 科目名规范化（抽取结果后处理，M4.10 F1 复测：LLM 原样保留表格行号
+# “一、营业收入”、行性质前缀“减：营业成本”、括号注释“（损失以…号填列）”
+# 与识别空格“现 金”，与 benchmark 科目名对不齐）。
+_NAME_PREFIX_RE = re.compile(r"^(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十]+）|\d+[、.]|(?:减|加|其中)：)")
+_NAME_PAREN_RE = re.compile(r"（[^）]*）")
+
+
+def normalize_item_name(raw: str) -> str:
+    """去行号/行性质前缀/括号注释/全角符号/空格，得到规范科目名。
+
+    与 ``scripts/rebuild_moutai_gt.py`` 的 GT 名称规范化保持同一套规则，
+    保证 F1 匹配口径一致（GT 侧已规范，预测侧在落库前规范化）。
+    """
+    name = raw.strip()
+    # 括号注释碎片截断（“损失以“－”号填列” 跨行拆分时只剩半截括号）
+    mark = name.find("号填")
+    if mark != -1:
+        paren = name.rfind("（", 0, mark)
+        name = name[:paren] if paren != -1 else name[:mark]
+    name = _NAME_PREFIX_RE.sub("", name)
+    name = _NAME_PAREN_RE.sub("", name)
+    name = name.replace("（", "").replace("）", "")
+    name = name.replace("－", "-").replace("—", "-").replace("“", "").replace("”", "")
+    return re.sub(r"\s+", "", name).strip()
+
 _extractor: Extractor | None = None
 _validator: Validator | None = None
 _object_store: ObjectStore | None = None
@@ -145,40 +184,170 @@ def _resolve_object_store() -> ObjectStore:
     return _object_store if _object_store is not None else MinioObjectClient(Settings())
 
 
+def _page_text(document: Document, page: Page) -> str:
+    """页文本 = 文本块 + 该页全部表格 HTML（页级评分/母公司判定用）。
+
+    Args:
+        document: Parse 产物（未使用，仅保持签名对称）。
+        page: 目标页。
+
+    Returns:
+        拼接后的页文本。
+    """
+    parts = [block.text for block in page.text_blocks]
+    parts.extend(table.html for table in page.table_blocks)
+    return "\n".join(parts)
+
+
+def _html_from_text_blocks(page: Page) -> str | None:
+    """无表格页的文本降级：从行文本重建简单 HTML 表格。
+
+    M4.10 F1 复测：64 页（合并现金流量表头部）被 PP-DocLayout 漏检，
+    无 table_block 但文本层完整（“销售商品、提供劳务收到的现金
+    183,990,403,487.80 …”整行）。仅对命中关键词的页触发，供 LLM
+    抽取兜底；不含金额的行（无值科目）直接跳过。
+
+    Args:
+        page: 无 table_block 的候选页。
+
+    Returns:
+        重建的 ``<table>`` HTML；无可重建行时返回 ``None``。
+    """
+    rows: list[str] = []
+    for block in page.text_blocks:
+        text = block.text.strip()
+        if not text:
+            continue
+        if re.search(r"\d{1,3} / \d{1,3}", text) or "年度报告" in text:
+            continue
+        if any(marker in text for marker in ("公司负责人", "单位：元", "币种", "每股收益")):
+            continue
+        match = _NUM_VALUE_RE.search(text)
+        if not match:
+            continue
+        name = text[: match.start()].strip()
+        if not name:
+            continue
+        value = match.group(1).replace(",", "")
+        rows.append(f"<tr><td>{name}</td><td>{value}</td></tr>")
+    if not rows:
+        return None
+    return "<table>" + "".join(rows) + "</table>"
+
+
+def _title_y0(page: Page, title: str) -> float | None:
+    """返回页文本块中 ``title`` 首次出现的 y 坐标；未出现返回 ``None``。
+
+    Args:
+        page: 目标页。
+        title: 报表标题（如「合并利润表」）。
+
+    Returns:
+        标题文本块顶部 y 坐标；页内无标题时 ``None``。
+    """
+    for block in page.text_blocks:
+        if title in block.text:
+            return block.bbox.y0
+    return None
+
+
 def select_table(
     document: Document, statement_type: StatementType
-) -> tuple[int, TableBlock] | None:
-    """按特征科目命中率选出目标报表最匹配的表格。
+) -> tuple[list[int], str, str] | None:
+    """按报表标题段定位目标报表的表格集合（跨页合并）。
 
-    评分 = 特征关键词命中数 - 母公司降权（0.5）。A 股年报同时披露
-    合并/母公司两套报表且科目名相同，勾稽与报告应基于合并口径；
-    母公司表降权而非排除（仅有母公司表时仍可计算会计恒等式）。
+    M4.10 修复（F1 复测发现）：合并利润表/现金流量表/资产负债表跨
+    2-4 页且页内混排母公司表，旧“单表选择”把母公司整页表误选。
+
+    - **段定位**：页文本含「合并XXX表」标题的页 → 段开始；含
+      「母公司XXX表」标题的页 → 段结束（排他）。段内命中关键词的
+      表格全部并入，按页序拼接 HTML；标题页只取标题上/下方的表
+      （59 页既有合并权益尾又有母公司表头，靠 bbox.y0 与标题位置
+      切分）；
+    - **文本降级**：段内命中关键词但无表格的页（PP-DocLayout 漏检，
+      如 64 页合并现金流量表头部），用行文本重建 HTML 兜底；
+    - scope 恒为「合并」（段由合并标题锚定；A 股年报合并报表为
+      法定披露，缺失合并标题时返回 None 走 DLQ 留排查现场）。
 
     Args:
         document: M4.03 parse 产物反序列化出的 Document。
         statement_type: 目标报表类型。
 
     Returns:
-        ``(page_index, table)``；无任何命中时返回 ``None``。
+        ``(pages, merged_html, scope)``；无命中时返回 ``None``。
     """
     keywords = _TABLE_KEYWORDS[statement_type.value]
-    best: tuple[float, int, TableBlock] | None = None
+    merged_title = _MERGED_TITLES[statement_type.value]
+    parent_title = _PARENT_TITLES[statement_type.value]
+
+    # 段开始页：合并标题所在页。
+    start_page: Page | None = None
+    start_title_y0 = 0.0
     for page in document.pages:
-        for table in page.table_blocks:
-            score = float(sum(1 for kw in keywords if kw in table.html))
-            if "母公司" in table.html:
-                score -= 0.5
-            if score > 0 and (best is None or score > best[0]):
-                best = (score, page.page_index, table)
-    if best is None:
+        y0 = _title_y0(page, merged_title)
+        if y0 is not None:
+            start_page = page
+            start_title_y0 = y0
+            break
+    if start_page is None:
+        LOGGER.warning("[select_table] %s 未找到合并标题段", merged_title)
         return None
+    start_idx = start_page.page_index
+
+    # 段结束页：母公司标题所在页（可缺——报表可能在文档尾部被切）。
+    end_page: Page | None = None
+    end_title_y0 = float("inf")
+    for page in document.pages:
+        if page.page_index < start_idx:
+            continue
+        y0 = _title_y0(page, parent_title)
+        if y0 is not None:
+            end_page = page
+            end_title_y0 = y0
+            break
+
+    merged_rows: list[tuple[int, float, str]] = []
+    for page in document.pages:
+        if page.page_index < start_idx:
+            continue
+        if page.page_index == start_idx:
+            # 起始页：合并标题下方的表（标题通常位于页底，此页往往无表）。
+            tables = [t for t in page.table_blocks if t.bbox.y0 >= start_title_y0]
+            allow_text_fallback = not tables
+        elif end_page is not None and page.page_index == end_page.page_index:
+            # 结束页：母公司标题上方的表属于合并段尾部（如 59 页合并权益尾）。
+            tables = [t for t in page.table_blocks if t.bbox.y0 < end_title_y0]
+            allow_text_fallback = False
+        elif end_page is not None and page.page_index > end_page.page_index:
+            continue
+        else:
+            tables = list(page.table_blocks)
+            allow_text_fallback = not tables
+
+        # 段内页整页并入（y 切分已排除混排的其它报表表）——表级不再按
+        # 关键词过滤：“（或股东权益）合计”等跨行单元格在 PP 的 HTML 里
+        # 不含完整关键词“所有者权益合计”，表级过滤会误丢合并权益尾。
+        if tables:
+            merged_rows.extend((page.page_index, t.bbox.y0, t.html) for t in tables)
+        elif allow_text_fallback and any(
+            kw in _page_text(document, page) for kw in keywords
+        ):
+            rebuilt = _html_from_text_blocks(page)
+            if rebuilt:
+                merged_rows.append((page.page_index, 0.0, rebuilt))
+    merged_rows.sort(key=lambda item: (item[0], item[1]))
+    if not merged_rows:
+        return None
+    merged_html = "\n".join(row[2] for row in merged_rows)
+    pages = sorted({row[0] for row in merged_rows})
+
     LOGGER.info(
-        "[select_table] type=%s page=%d score=%.1f",
+        "[select_table] type=%s pages=%s scope=合并 rows=%d",
         statement_type.value,
-        best[1],
-        best[0],
+        pages,
+        len(merged_rows),
     )
-    return best[1], best[2]
+    return pages, merged_html, "合并"
 
 
 def extract_report_period(document: Document) -> str:
@@ -270,33 +439,43 @@ async def handle(message: TaskMessage) -> dict[str, Any]:
         raise AiException(
             f"no {statement_value} table found in parse artifact taskId={message.task_id}"
         )
-    page_index, table = selected
+    pages, merged_html, scope = selected
 
     extractor = _resolve_extractor()
     result, validation = extract_with_retry(
         extractor,
         _resolve_validator(),
-        table.html,
+        merged_html,
         statement_type,
         report_period=extract_report_period(document),
+        scope=scope,
     )
     # retried 推断：>1 次 generate 说明经历过 validator 重试。
     hub = getattr(extractor, "hub", None)
     generate_calls = getattr(hub, "calls", 1)
     retried = generate_calls > 1
 
+    # 科目名规范化：与 benchmark GT 同一套规则（行号/前缀/括号注释/空格）。
+    if result.statement is not None:
+        for items in result.statement.statements.values():
+            for item in items:
+                normalized = normalize_item_name(item.item)
+                if normalized:
+                    item.item = normalized
+
     LOGGER.info(
         "[handle] extract 完成 taskId=%s step=%s success=%s retried=%s "
-        "tokens=%d latency_ms=%.1f source_page=%d",
+        "tokens=%d latency_ms=%.1f source_pages=%s scope=%s",
         message.task_id,
         message.step,
         result.success,
         retried,
         result.prompt_tokens + result.completion_tokens,
         result.latency_ms,
-        page_index,
+        pages,
+        scope,
     )
-    return _build_payload(result, validation, page_index, retried)
+    return _build_payload(result, validation, pages[0], retried)
 
 
 def _build_payload(

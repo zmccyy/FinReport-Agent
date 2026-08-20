@@ -130,11 +130,23 @@ def make_document(
     page0_blocks: list[Any] = []
     if title:
         page0_blocks.append(TextBlock(bbox=BoundingBox(x0=0, y0=0, x1=100, y1=10), text=title))
+    if with_cf:
+        # M4.10：报表段由「合并现金流量表」标题定位（页文本块）。
+        page0_blocks.append(
+            TextBlock(bbox=BoundingBox(x0=0, y0=12, x1=200, y1=20), text="合并现金流量表")
+        )
     page0_tables = (
         [TableBlock(bbox=BoundingBox(x0=0, y0=20, x1=100, y1=80), html=CF_HTML)] if with_cf else []
     )
+    page1_blocks: list[Any] = []
+    if with_bs:
+        page1_blocks.append(
+            TextBlock(bbox=BoundingBox(x0=0, y0=12, x1=200, y1=20), text="合并资产负债表")
+        )
     page1_tables = (
-        [TableBlock(bbox=BoundingBox(x0=0, y0=0, x1=100, y1=100), html=BS_HTML)] if with_bs else []
+        [TableBlock(bbox=BoundingBox(x0=0, y0=120, x1=100, y1=200), html=BS_HTML)]
+        if with_bs
+        else []
     )
     return Document(
         source="uploads/1/demo.pdf",
@@ -151,6 +163,7 @@ def make_document(
                 page_index=1,
                 width=595,
                 height=842,
+                text_blocks=page1_blocks,
                 table_blocks=page1_tables,
             ),
         ],
@@ -185,9 +198,10 @@ def test_select_table_picks_highest_scoring_table() -> None:
     document = make_document()
     selected = select_table(document, StatementType.BALANCE_SHEET)
     assert selected is not None
-    page_index, table = selected
-    assert page_index == 1
-    assert "资产总计" in table.html
+    pages, merged_html, scope = selected
+    assert pages == [1]
+    assert "资产总计" in merged_html
+    assert scope == "合并"
 
 
 def test_select_table_returns_none_without_match() -> None:
@@ -198,7 +212,7 @@ def test_select_table_returns_none_without_match() -> None:
 
 
 def test_select_table_prefers_consolidated_over_parent_company() -> None:
-    """同分时合并报表优先（母公司表降权 0.5）。"""
+    """同分时合并报表优先（页级母公司标题强降权 -2）。"""
     parent_html = BS_HTML + "<tr><td>母公司</td><td>x</td></tr>"
     document = Document(
         source="uploads/1/demo.pdf",
@@ -208,25 +222,132 @@ def test_select_table_prefers_consolidated_over_parent_company() -> None:
                 page_index=0,
                 width=595,
                 height=842,
+                text_blocks=[
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=0, x1=200, y1=10),
+                        text="母公司资产负债表",
+                    )
+                ],
                 table_blocks=[
-                    TableBlock(bbox=BoundingBox(x0=0, y0=0, x1=100, y1=100), html=parent_html)
+                    TableBlock(bbox=BoundingBox(x0=0, y0=20, x1=100, y1=100), html=parent_html)
                 ],
             ),
             Page(
                 page_index=1,
                 width=595,
                 height=842,
+                text_blocks=[
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=110, x1=200, y1=120),
+                        text="合并资产负债表",
+                    )
+                ],
                 table_blocks=[
-                    TableBlock(bbox=BoundingBox(x0=0, y0=0, x1=100, y1=100), html=BS_HTML)
+                    TableBlock(bbox=BoundingBox(x0=0, y0=120, x1=100, y1=200), html=BS_HTML)
                 ],
             ),
         ],
     )
     selected = select_table(document, StatementType.BALANCE_SHEET)
     assert selected is not None
-    page_index, table = selected
-    assert page_index == 1
-    assert "母公司" not in table.html
+    pages, merged_html, scope = selected
+    assert pages == [1]
+    assert "母公司" not in merged_html
+    assert scope == "合并"
+
+
+def test_select_table_merges_tables_across_pages() -> None:
+    """M4.10：合并利润表跨页拆散时，命中表全部拼接交给 LLM。"""
+    is_page1 = (
+        "<table><tr><td>其中：营业收入</td><td>1688</td></tr>"
+        "<tr><td>其中：营业成本</td><td>148</td></tr></table>"
+    )
+    is_page2 = "<table><tr><td>五、净利润</td><td>853</td></tr></table>"
+    parent_is = (
+        "<table><tr><td>一、营业收入</td><td>983</td></tr>"
+        "<tr><td>四、净利润</td><td>853</td></tr>"
+        "<tr><td>营业成本</td><td>160</td></tr>"
+        "<tr><td>利润总额</td><td>976</td></tr></table>"
+    )
+    document = Document(
+        source="uploads/1/demo.pdf",
+        page_count=3,
+        pages=[
+            Page(
+                page_index=0, width=595, height=842,
+                text_blocks=[
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=0, x1=200, y1=10),
+                        text="合并利润表",
+                    )
+                ],
+                table_blocks=[
+                    TableBlock(bbox=BoundingBox(x0=0, y0=20, x1=100, y1=100), html=is_page1)
+                ],
+            ),
+            Page(
+                page_index=1, width=595, height=842,
+                table_blocks=[
+                    TableBlock(bbox=BoundingBox(x0=0, y0=0, x1=100, y1=100), html=is_page2)
+                ],
+            ),
+            Page(
+                page_index=2, width=595, height=842,
+                text_blocks=[
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=0, x1=200, y1=10),
+                        text="母公司利润表",
+                    )
+                ],
+                table_blocks=[
+                    TableBlock(bbox=BoundingBox(x0=0, y0=20, x1=100, y1=100), html=parent_is)
+                ],
+            ),
+        ],
+    )
+    selected = select_table(document, StatementType.INCOME_STATEMENT)
+    assert selected is not None
+    pages, merged_html, scope = selected
+    assert pages == [0, 1]  # 母公司页被排除，合并表两页都拼接
+    assert "营业收入" in merged_html and "净利润" in merged_html
+    assert "母公司" not in merged_html
+    assert scope == "合并"
+
+
+def test_select_table_uses_text_fallback_for_tableless_page() -> None:
+    """M4.10：页命中关键词但无表格（PP 漏检）时用文本行重建 HTML。"""
+    document = Document(
+        source="uploads/1/demo.pdf",
+        page_count=1,
+        pages=[
+            Page(
+                page_index=0,
+                width=595,
+                height=842,
+                text_blocks=[
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=0, x1=200, y1=10),
+                        text="合并现金流量表",
+                    ),
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=20, x1=300, y1=30),
+                        text="销售商品、提供劳务收到的现金 183,990,403,487.80",
+                    ),
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=32, x1=300, y1=42),
+                        text="经营活动产生的现金流量净额 61,522,204,989.35",
+                    ),
+                ],
+            ),
+        ],
+    )
+    selected = select_table(document, StatementType.CASH_FLOW)
+    assert selected is not None
+    pages, merged_html, scope = selected
+    assert pages == [0]
+    assert "销售商品、提供劳务收到的现金" in merged_html
+    assert "183990403487.80" in merged_html
+    assert scope == "合并"
 
 
 def test_extract_report_period_variants() -> None:

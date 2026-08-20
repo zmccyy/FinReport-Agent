@@ -217,6 +217,23 @@ def test_generate_malformed_body_raises() -> None:
         backend.generate("p", max_new_tokens=8, temperature=0.0, timeout_seconds=5.0)
 
 
+def test_generate_reasoning_truncation_raises_clear_error() -> None:
+    """Empty content + finish_reason=length must fail with a diagnostic error.
+
+    M4.10 回归：reasoning 模型（deepseek-v4-flash）把 token 预算花在
+    reasoning_content 上，content 为空——此前静默返回空串，三表抽取
+    全部 "empty model output"（validator 只见空输出，根因难查）。
+    """
+    body = _ok_body(content="")
+    body["choices"][0]["finish_reason"] = "length"
+    body["choices"][0]["message"]["reasoning_content"] = "spent on reasoning"
+    recorder = _TransportRecorder(httpx.Response(200, json=body))
+    backend = _backend(recorder)
+
+    with pytest.raises(AiException, match="truncated"):
+        backend.generate("p", max_new_tokens=8, temperature=0.0, timeout_seconds=5.0)
+
+
 def test_load_without_api_key_raises() -> None:
     """Missing LLM_API_KEY fails fast with ModelLoadException."""
     backend = DeepSeekBackend(settings=_settings(llm_api_key=""))

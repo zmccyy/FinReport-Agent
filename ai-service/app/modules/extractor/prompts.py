@@ -29,6 +29,9 @@ _SYSTEM_PROMPT = (
     "数值字段必须是数字（不要带千分位逗号、单位或括号）；负数用负号表示。"
     "scope 字段只能是「合并」或「母公司」；period 字段只能是「本期」「上期」"
     "「本年累计」「上年同期」。"
+    "item 字段只填科目名称：去掉行号编号（如“一、”“（一）”“1.”）、行性质前缀"
+    "（如“减：”“加：”“其中：”）、括号注释（如“（损失以“－”号填列）”）以及"
+    "名称内多余空格。"
 )
 
 _OUTPUT_SCHEMA_HINT = """{
@@ -50,6 +53,7 @@ def build_extract_prompt(
     report_period: str = "",
     company_code: str = "",
     unit: str = "元",
+    scope: str = "",
 ) -> str:
     """Render the chat-style extraction prompt for one statement table.
 
@@ -62,6 +66,10 @@ def build_extract_prompt(
             unknown (model is told to fill ``report_period`` itself).
         company_code: A-share ticker (e.g. ``"600519"``); optional.
         unit: Unit hint for the value field (``元`` / ``万元`` / ``百万元``).
+        scope: Consolidation scope of the selected table (``合并`` /
+            ``母公司``). Injected so the model's ``scope`` field matches
+            the table the extractor actually selected (M4.10: parent-
+            company tables were previously mislabeled as consolidated).
 
     Returns:
         A single prompt string ready for ``ModelHub.generate``. Caller
@@ -71,6 +79,8 @@ def build_extract_prompt(
         f"请从下面的「{statement_type.chinese_name}」HTML 表格中抽取所有科目数据。",
         f'目标 statement_type = "{statement_type.value}"。',
     ]
+    if scope:
+        header_lines.append(f"本表为{scope}报表：所有科目的 scope 字段必须填「{scope}」。")
     if report_period:
         header_lines.append(f"报告期末日：{report_period}")
     if company_code:

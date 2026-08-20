@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from app.core.exceptions import AiException
-from app.modules.parser.document_parser import DocumentParser
+from app.modules.parser.document_parser import DocumentParser, StatementPageFilter
 from app.schemas.document import TableBlock, TextBlock, BoundingBox
 
 
@@ -186,6 +186,61 @@ def test_to_text_block_skips_zero_area_bbox() -> None:
         "lines": [{"spans": [{"text": "x"}]}],
     }
     assert parser._to_text_block(degenerate) is None
+
+
+def test_table_recognition_runs_only_on_statement_pages(
+    keyword_pdf_bytes: bytes,
+) -> None:
+    """M4.10 报表页过滤：仅锚点窗口内金额密集页调用 layout analyzer。
+
+    全页 PP-Structure 143 页年报 >18min 且附注密集页 OOM（SLA 90s 不可达），
+    StatementPageFilter 是落地路径，此测试锁定该行为不被回退。
+    """
+    layout = _FakeLayout(
+        tables=[TableBlock(bbox=_bbox(5, 5, 100, 50), html="<table></table>")]
+    )
+    page_filter = StatementPageFilter(
+        window=2, amount_threshold=2, anchor_pattern="BALANCE SHEET"
+    )
+    parser = DocumentParser(layout_analyzer=layout, table_page_filter=page_filter)
+
+    document = parser.parse_bytes(keyword_pdf_bytes, source="uploads/kw.pdf")
+
+    # 页 0/2 含锚点标题 + 金额密度达标；页 1（附注页，低密度）跳过。
+    assert [c[0] for c in layout.calls] == [0, 2]
+    assert document.pages[0].table_blocks
+    assert document.pages[1].table_blocks == []
+    assert document.pages[2].table_blocks
+
+
+def test_table_recognition_runs_all_pages_without_filter(
+    keyword_pdf_bytes: bytes,
+) -> None:
+    """filter=None = 不过滤（旧行为，向后兼容）。"""
+    layout = _FakeLayout()
+    parser = DocumentParser(layout_analyzer=layout, table_page_filter=None)
+
+    parser.parse_bytes(keyword_pdf_bytes, source="uploads/kw.pdf")
+
+    assert [c[0] for c in layout.calls] == [0, 1, 2]
+
+
+def test_statement_page_filter_window_and_density() -> None:
+    """StatementPageFilter 纯逻辑：窗口过期 + 密度门控。"""
+    page_filter = StatementPageFilter(window=2, amount_threshold=2)
+    dense = "1,234.56 2,345.67 3,456.78"
+    sparse = "plain notes text"
+
+    # 锚点页自身需过密度门（稀疏锚点页排除——目录页引用报表标题的场景）。
+    assert page_filter.is_candidate(0, "合并资产负债表\n" + dense) is True
+    # 窗口内无标题的续页（金额密集）命中。
+    assert page_filter.is_candidate(1, "续表\n" + dense) is True
+    # 窗口外的金额密集页（附注表格）不命中。
+    assert page_filter.is_candidate(5, dense) is False
+    # 窗口内但密度不足的页不命中。
+    assert page_filter.is_candidate(2, sparse) is False
+    # 无锚点、无密度的普通页不命中。
+    assert page_filter.is_candidate(10, sparse) is False
 
 
 def test_metadata_carries_render_dpi(text_pdf_bytes: bytes) -> None:

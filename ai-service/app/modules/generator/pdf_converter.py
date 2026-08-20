@@ -372,7 +372,8 @@ def _render_fallback_pdf(
   <style>
     @page {{ size: A4; margin: 20mm; }}
     body {{
-      font-family: "Noto Sans CJK SC", "Microsoft YaHei", "SimHei", sans-serif;
+      font-family: "Noto Sans CJK SC", "Microsoft YaHei", "SimHei",
+                   "WenQuanYi Zen Hei", sans-serif;
       font-size: 11pt;
       color: #333;
     }}
