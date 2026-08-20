@@ -822,6 +822,15 @@ public class TaskOrchestrator {
      * 内部对 null pdfMd5 返回空 Mono）；Redis 故障在 cache 层已静默吞掉。</p>
      */
     private Mono<Void> storeExtractCache(String taskId, TaskStepName step, Map<String, Object> result) {
+        // M4.10 修复：仅缓存 success=true 的抽取结果。L3 的 step SUCCESS 只表示
+        // "该步骤已处理完并回报"，result.success=false 时 StatementWriter 会跳过
+        // 写库——若此类 payload 也进缓存，后续同 PDF 任务命中后跳过 MQ 抽取、
+        // 直接重放失败结果，CHECK 因无数据重试耗尽（真实 E2E 实测）。
+        if (!Boolean.TRUE.equals(result.get("success"))) {
+            log.info("[TaskOrchestrator] extract result.success=false，跳过缓存写入 taskId={} step={}",
+                    taskId, step);
+            return Mono.empty();
+        }
         return reportRepo.findByTaskId(taskId)
                 .flatMap(report -> extractCacheService.store(report.getPdfMd5(), step, result))
                 .onErrorResume(error -> {

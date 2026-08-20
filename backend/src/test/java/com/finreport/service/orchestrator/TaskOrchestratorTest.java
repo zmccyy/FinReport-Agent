@@ -971,6 +971,49 @@ class TaskOrchestratorTest {
         }
 
         @Test
+        @DisplayName("should NOT cache extract result when result.success=false")
+        void shouldNotCacheExtractResultWhenSuccessIsFalse() {
+            // M4.10 回归：L3 抽取失败（success=false）的 step 仍回报 SUCCESS progress，
+            // 若进缓存，同 PDF 重传时命中脏缓存 → 跳过 MQ 抽取 → CHECK 无数据
+            // 重试耗尽（真实 E2E 实测）。缓存只允许收 success=true 的 payload。
+            Task task = Task.builder()
+                    .id("task-store-cache-failed")
+                    .userId(1L)
+                    .status(TaskStatus.EXTRACT_RUNNING.name())
+                    .build();
+            TaskStep bs = TaskStep.builder().taskId(task.getId()).stepName("EXTRACT_BS")
+                    .status(StepStatus.RUNNING.name()).build();
+
+            Map<String, Object> result = Map.of(
+                    "success", false,
+                    "error", "empty model output",
+                    "statement", Map.of());
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_BS")).thenReturn(Mono.just(bs));
+            lenient().when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_IS"))
+                    .thenReturn(Mono.empty());
+            lenient().when(stepRepo.findByTaskIdAndStepName(task.getId(), "EXTRACT_CF"))
+                    .thenReturn(Mono.empty());
+            when(extractTracker.recordSuccess(eq(task.getId()), any(TaskStepName.class)))
+                    .thenReturn(Mono.just(1));
+            when(extractTracker.hasFailed(task.getId())).thenReturn(Mono.just(false));
+            when(statementWriter.writeStatement(task.getId(), "EXTRACT_BS", result))
+                    .thenReturn(Mono.just(0));
+
+            StepVerifier.create(orchestrator.handleStepProgress(
+                            task.getId(), "EXTRACT_BS", "SUCCESS", result))
+                    .assertNext(saved -> assertEquals(TaskStatus.EXTRACT_PARTIAL.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            // 关键断言：失败结果绝不进缓存（reportRepo 不应被查询）。
+            verify(reportRepo, never()).findByTaskId(anyString());
+            verify(extractCacheService, never()).store(anyString(), any(), any());
+        }
+
+        @Test
         @DisplayName("M2 review Blocker B: replay 短路已 SUCCESS 的 step，不重复写库")
         void shouldShortCircuitReplayForAlreadySuccessfulStep() {
             Task task = Task.builder()
