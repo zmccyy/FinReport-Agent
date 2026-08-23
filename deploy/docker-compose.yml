@@ -263,11 +263,13 @@ services:
     environment:
       JAVA_OPTS: "-Xms256m -Xmx512m"
       SPRING_PROFILES_ACTIVE: docker
-      # JWT 签名密钥。application.yml docker profile 无内置默认值（生产
-      # 必须显式注入），缺省会令 JwtUtil 构造抛 WeakKeyException 重启循环
-      # （M4.10 base compose E2E 实测；此前只有 dev overlay 注入，base
-      # compose 单独跑 backend 必崩）。deploy/.env 可覆盖为正式密钥。
-      JWT_SECRET: ${JWT_SECRET:-finreport-dev-jwt-secret-must-be-at-least-32-characters}
+      # JWT 签名密钥。base compose 不提供默认值（M4.10 审查修复 H3：
+      # 此前的 52 字符开发默认值可绕过 JwtSecretValidator 在任意
+      # profile 下静默通过，公开密钥可伪造任意 userId 的 token）——
+      # 未在 .env 显式配置时 JwtSecretValidator 启动即失败（fail-loud）。
+      # 开发栈走 base + dev overlay（AGENTS.md §7.1），dev overlay 注入
+      # 开发默认值；生产环境必须通过受管密钥注入 JWT_SECRET。
+      JWT_SECRET: ${JWT_SECRET:-}
       # 基础设施连接
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"
