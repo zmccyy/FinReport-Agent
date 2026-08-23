@@ -76,6 +76,12 @@ class StatementReader(Protocol):
         """按 taskId 取报表元信息 + 三表科目行。"""
         ...
 
+    def fetch_report_statements_by_report_id(
+        self, report_id: int
+    ) -> ReportStatements | None:
+        """按 reportId 取报表元信息 + 三表科目行（M5.02 问答工具）；无则 None。"""
+        ...
+
     def fetch_year_ago_statements(
         self, company_code: str, current_period: str
     ) -> ReportStatements | None:
@@ -116,6 +122,27 @@ class ReadOnlyMySqlClient:
         )
         if not reports:
             raise AiException(f"report not found for taskId={task_id}")
+        return self._load_statements(reports[0])
+
+    def fetch_report_statements_by_report_id(
+        self, report_id: int
+    ) -> ReportStatements | None:
+        """按 reportId 取报表元信息 + 三表科目行（M5.02 问答工具用）。
+
+        Args:
+            report_id: 报表 ID（对话上下文绑定）。
+
+        Returns:
+            报表元信息 + 科目行；report 不存在返回 None（业务性缺失，
+            与 fetch_report_statements 的抛异常语义区分——工具场景
+            返回可观测的 null 而非中断）。
+        """
+        reports = self._query(
+            "SELECT id, company_code, company_name, report_period FROM report WHERE id = %s",
+            (report_id,),
+        )
+        if not reports:
+            return None
         return self._load_statements(reports[0])
 
     def fetch_year_ago_statements(
