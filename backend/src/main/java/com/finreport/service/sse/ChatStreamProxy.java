@@ -29,7 +29,9 @@ public class ChatStreamProxy {
 
     private static final Logger log = LoggerFactory.getLogger(ChatStreamProxy.class);
 
-    /** 整流超时（spec §12.1 问答完整回答 < 60s；L3 另有 120s 兜底）。 */
+    /** 整流超时。spec §3.7 单轮 60s 超时以单次生成为口径；多步 ReAct
+     *  单轮实测可达 100s+（见 L3 chat.py CHAT_STREAM_TIMEOUT_SECONDS），
+     *  150s 覆盖 L3 120s 整流上限后留网络余量，防前端 SSE 无限挂起。 */
     private static final Duration STREAM_TIMEOUT = Duration.ofSeconds(150);
 
     private static final ParameterizedTypeReference<ServerSentEvent<String>> SSE_TYPE =

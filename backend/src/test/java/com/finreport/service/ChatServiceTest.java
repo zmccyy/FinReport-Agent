@@ -133,16 +133,19 @@ class ChatServiceTest {
     void shouldStreamAndPersistAccumulatedAnswerOnDone() {
         ChatSession chat = session(1L, 7L, 17L);
         when(sessionRepository.findByIdAndUserId(1L, 7L)).thenReturn(Mono.just(chat));
-        when(messageRepository.save(any(ChatMessage.class))).thenAnswer(i -> Mono.just(i.getArgument(0)));
+        when(messageRepository.save(any(ChatMessage.class))).thenAnswer(i -> {
+            ChatMessage saved = i.getArgument(0);
+            return Mono.just(saved.getId() == null ? withId(saved) : saved);
+        });
         when(reportRepository.findById(17L)).thenReturn(Mono.just(report(17L, 7L)));
-        when(contextService.loadContext(1L)).thenReturn(Mono.just(new SessionContextService.SessionContext("", List.of())));
-        when(contextService.appendRound(anyLong(), any(String.class), any(String.class)))
+        when(contextService.loadContext(7L, 1L)).thenReturn(Mono.just(new SessionContextService.SessionContext("", List.of())));
+        when(contextService.appendRound(anyLong(), anyLong(), any(String.class), any(String.class)))
                 .thenReturn(Mono.empty());
         when(streamProxy.stream(any(ChatStreamRequest.class), eq(null)))
                 .thenReturn(Flux.just(
                         sse("token", "{\"content\":\"营收\"}"),
                         sse("token", "{\"content\":\" 1688 亿\"}"),
-                        sse("done", "{\"messageId\":\"m-1\",\"tokenCount\":2,\"toolsUsed\":[\"query_statement\"],\"finishedReason\":\"final_answer\",\"error\":\"\"}")));
+                        sse("done", "{\"messageId\":\"100\",\"tokenCount\":2,\"toolsUsed\":[\"query_statement\"],\"finishedReason\":\"final_answer\",\"error\":\"\"}")));
 
         StepVerifier.create(service.sendMessage(1L, 7L, new SendMessageRequest("营收？")))
                 .expectNextCount(2) // token
@@ -161,9 +164,12 @@ class ChatServiceTest {
     void shouldPassThroughErrorEventWithoutPersistingAssistant() {
         ChatSession chat = session(1L, 7L, 17L);
         when(sessionRepository.findByIdAndUserId(1L, 7L)).thenReturn(Mono.just(chat));
-        when(messageRepository.save(any(ChatMessage.class))).thenAnswer(i -> Mono.just(i.getArgument(0)));
+        when(messageRepository.save(any(ChatMessage.class))).thenAnswer(i -> {
+            ChatMessage saved = i.getArgument(0);
+            return Mono.just(saved.getId() == null ? withId(saved) : saved);
+        });
         when(reportRepository.findById(17L)).thenReturn(Mono.just(report(17L, 7L)));
-        when(contextService.loadContext(1L)).thenReturn(Mono.just(new SessionContextService.SessionContext("", List.of())));
+        when(contextService.loadContext(7L, 1L)).thenReturn(Mono.just(new SessionContextService.SessionContext("", List.of())));
         when(streamProxy.stream(any(ChatStreamRequest.class), eq(null)))
                 .thenReturn(Flux.just(sse("error", "{\"code\":\"CHAT_FAILED\",\"message\":\"boom\"}")));
 
@@ -194,11 +200,14 @@ class ChatServiceTest {
     void shouldPassReportContextAndHistoryToProxy() {
         ChatSession chat = session(1L, 7L, 17L);
         when(sessionRepository.findByIdAndUserId(1L, 7L)).thenReturn(Mono.just(chat));
-        when(messageRepository.save(any(ChatMessage.class))).thenAnswer(i -> Mono.just(i.getArgument(0)));
+        when(messageRepository.save(any(ChatMessage.class))).thenAnswer(i -> {
+            ChatMessage saved = i.getArgument(0);
+            return Mono.just(saved.getId() == null ? withId(saved) : saved);
+        });
         when(reportRepository.findById(17L)).thenReturn(Mono.just(report(17L, 7L)));
-        when(contextService.loadContext(1L)).thenReturn(Mono.just(new SessionContextService.SessionContext(
+        when(contextService.loadContext(7L, 1L)).thenReturn(Mono.just(new SessionContextService.SessionContext(
                 "旧摘要", List.of(new com.finreport.domain.dto.ChatDtos.ChatTurn("user", "之前的问题")))));
-        when(contextService.appendRound(anyLong(), any(String.class), any(String.class)))
+        when(contextService.appendRound(anyLong(), anyLong(), any(String.class), any(String.class)))
                 .thenReturn(Mono.empty());
         when(streamProxy.stream(any(ChatStreamRequest.class), eq(null)))
                 .thenReturn(Flux.just(sse("done", "{\"messageId\":\"m\",\"tokenCount\":0,\"toolsUsed\":[],\"finishedReason\":\"final_answer\",\"error\":\"\"}")));
@@ -208,12 +217,21 @@ class ChatServiceTest {
                 .verifyComplete();
 
         verify(streamProxy).stream(org.mockito.ArgumentMatchers.argThat(request ->
-                "旧摘要".equals(request.summary())
+                "100".equals(request.messageId())
+                        && "旧摘要".equals(request.summary())
                         && request.history().size() == 1
                         && "贵州茅台（600519），报告期 2025-12-31".equals(request.companyContext())), eq(null));
         verify(messageProducer).publishChat(any(ChatStreamRequest.class), eq(null));
         // done 后异步追加会话上下文（fire-and-forget；本用例无 token 事件，答案为空）
-        verify(contextService).appendRound(1L, "追问", "");
+        verify(contextService).appendRound(7L, 1L, "追问", "");
+    }
+
+    private static ChatMessage withId(ChatMessage message) {
+        ChatMessage copy = ChatMessage.builder().id(100L).sessionId(message.getSessionId())
+                .role(message.getRole()).content(message.getContent())
+                .toolsUsed(message.getToolsUsed()).tokenCount(message.getTokenCount())
+                .createdAt(message.getCreatedAt()).build();
+        return copy;
     }
 
     private static ServerSentEvent<String> sse(String event, String data) {

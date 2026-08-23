@@ -95,7 +95,7 @@ class SessionContextServiceTest {
         when(redisTemplate.expire(any(String.class), any(java.time.Duration.class)))
                 .thenReturn(Mono.just(true));
 
-        StepVerifier.create(service.loadContext(1L))
+        StepVerifier.create(service.loadContext(7L, 1L))
                 .assertNext(context -> {
                     assertEquals("", context.summary());
                     assertEquals(2, context.turns().size());
@@ -112,7 +112,7 @@ class SessionContextServiceTest {
         when(hashOps.multiGet(any(String.class), any(List.class)))
                 .thenReturn(Mono.just(List.of("旧摘要", historyJson)));
 
-        StepVerifier.create(service.loadContext(1L))
+        StepVerifier.create(service.loadContext(7L, 1L))
                 .assertNext(context -> {
                     assertEquals("旧摘要", context.summary());
                     assertEquals(2, context.turns().size());
@@ -136,7 +136,7 @@ class SessionContextServiceTest {
         when(redisTemplate.expire(any(String.class), any(java.time.Duration.class)))
                 .thenReturn(Mono.just(true));
 
-        StepVerifier.create(service.appendRound(1L, "第10轮问题", "第10轮回答"))
+        StepVerifier.create(service.appendRound(7L, 1L, "第10轮问题", "第10轮回答"))
                 .verifyComplete();
 
         assertEquals(0, compressHits, "10 轮内不应触发压缩");
@@ -152,7 +152,7 @@ class SessionContextServiceTest {
         when(redisTemplate.expire(any(String.class), any(java.time.Duration.class)))
                 .thenReturn(Mono.just(true));
 
-        StepVerifier.create(service.appendRound(1L, "第11轮问题", "第11轮回答"))
+        StepVerifier.create(service.appendRound(7L, 1L, "第11轮问题", "第11轮回答"))
                 .verifyComplete();
 
         // 第 11 轮 → 压缩被调用（HTTP 服务器命中 1 次）
@@ -174,7 +174,7 @@ class SessionContextServiceTest {
         when(redisTemplate.expire(any(String.class), any(java.time.Duration.class)))
                 .thenReturn(Mono.just(true));
 
-        StepVerifier.create(service.appendRound(1L, "第11轮问题", "第11轮回答"))
+        StepVerifier.create(service.appendRound(7L, 1L, "第11轮问题", "第11轮回答"))
                 .verifyComplete();
 
         // 摘要被更新为 L3 压缩结果；历史裁剪回 20 条
@@ -200,7 +200,7 @@ class SessionContextServiceTest {
         when(redisTemplate.expire(any(String.class), any(java.time.Duration.class)))
                 .thenReturn(Mono.just(true));
 
-        StepVerifier.create(service.appendRound(1L, "问题", "回答"))
+        StepVerifier.create(service.appendRound(7L, 1L, "问题", "回答"))
                 .verifyComplete(); // 不抛错
 
         assertEquals("", captured.get("summary")); // 摘要保持旧值

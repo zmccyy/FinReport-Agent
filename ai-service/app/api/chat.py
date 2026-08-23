@@ -36,7 +36,10 @@ from app.utils.logger import get_logger
 LOGGER = get_logger(__name__)
 router = APIRouter(tags=["chat"])
 
-# 单次问答整流超时（spec §12.1 问答完整回答 < 60s；多步 ReAct 留余量）。
+# 单次问答整流超时。spec §3.7 单轮「首 token <15s、完整 <30s、超时 60s」
+# 以单次生成为口径；多步 ReAct（步数上限 8，单步生成 SLA 300s）实测单轮
+# 可达 100s+（真实冒烟 6-7 次工具调用 127s），60s 整流会切断正常链路。
+# 120s 是多步 ReAct 的整流上限（防无限挂起），完整回答 SLA 在 M5.09 实测。
 CHAT_STREAM_TIMEOUT_SECONDS = 120.0
 # 最终答案 token 事件切块目标长度（字符）。
 TOKEN_CHUNK_SIZE = 64
