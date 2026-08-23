@@ -1,6 +1,7 @@
 package com.finreport.service.orchestrator;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -763,7 +764,22 @@ public class TaskOrchestrator {
         String taskId = task.getId();
         return reportRepo.findByTaskId(taskId)
                 .flatMap(report -> extractCacheService.lookupAll(report.getPdfMd5())
-                        .flatMap(cached -> {
+                        .flatMap(rawCached -> {
+                            // M4.10 审查修复 H2：读取侧过滤 success=false 的脏缓存条目
+                            // （写侧门控修复前写入，7 天 TTL 内重放会触发「步骤标 SUCCESS
+                            // 但 StatementWriter 跳过写库 → CHECK 无数据重试耗尽」）。
+                            // 脏条目视为 miss 走 MQ 重抽，新 success 结果覆盖写同 key 后自愈。
+                            Map<TaskStepName, Map<String, Object>> cached = new LinkedHashMap<>();
+                            for (Map.Entry<TaskStepName, Map<String, Object>> entry
+                                    : rawCached.entrySet()) {
+                                if (Boolean.TRUE.equals(entry.getValue().get("success"))) {
+                                    cached.put(entry.getKey(), entry.getValue());
+                                } else {
+                                    log.warn("[TaskOrchestrator] extract 缓存含 success=false "
+                                            + "脏条目，忽略并走 MQ 重抽 pdfMd5={} step={}",
+                                            report.getPdfMd5(), entry.getKey());
+                                }
+                            }
                             if (cached.size() == ExtractCacheService.EXTRACTION_STEPS.size()) {
                                 log.info("[TaskOrchestrator] extract 缓存全部命中，跳过 MQ taskId={} pdfMd5={}",
                                         taskId, report.getPdfMd5());

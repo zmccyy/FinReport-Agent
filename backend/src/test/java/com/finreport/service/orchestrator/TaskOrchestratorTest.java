@@ -898,6 +898,49 @@ class TaskOrchestratorTest {
         }
 
         @Test
+        @DisplayName("should fall through to extract dispatch when cached entry has success=false (H2)")
+        void shouldFallThroughToExtractDispatchWhenCacheEntryHasSuccessFalse() {
+            // M4.10 审查修复 H2：读取侧过滤脏缓存。写侧门控修复前写入的
+            // success=false 条目（7 天 TTL）若被重放，会触发「步骤标 SUCCESS
+            // 但 StatementWriter 跳过写库 → CHECK 无数据重试耗尽」——与写侧
+            // 修复声称消除的 bug 相同。脏条目应视为 miss 走 MQ 重抽。
+            Task task = Task.builder()
+                    .id("task-dirty-cache")
+                    .userId(1L)
+                    .status(TaskStatus.PARSE_RUNNING.name())
+                    .payload("{\"pdfObjectKey\":\"uploads/test.pdf\"}")
+                    .build();
+            Report report = Report.builder()
+                    .id(13L)
+                    .taskId(task.getId())
+                    .pdfMd5("md5-dirty")
+                    .build();
+            TaskStep parse = TaskStep.builder().taskId(task.getId()).stepName("PARSE")
+                    .status(StepStatus.RUNNING.name()).build();
+
+            when(taskRepo.findById(task.getId())).thenReturn(Mono.just(task));
+            when(taskRepo.save(any(Task.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.save(any(TaskStep.class))).thenAnswer(inv -> Mono.just(inv.getArgument(0)));
+            when(stepRepo.findByTaskIdAndStepName(task.getId(), "PARSE")).thenReturn(Mono.just(parse));
+            when(reportRepo.findByTaskId(task.getId())).thenReturn(Mono.just(report));
+            // 三表全命中但 BS 为修复前写入的 success=false 脏条目。
+            when(extractCacheService.lookupAll("md5-dirty")).thenReturn(Mono.just(Map.of(
+                    TaskStepName.EXTRACT_BS, Map.of("success", false, "error", "generation failed"),
+                    TaskStepName.EXTRACT_IS, Map.of("success", true),
+                    TaskStepName.EXTRACT_CF, Map.of("success", true))));
+            when(extractDispatcher.dispatchAll(any(Task.class), any(Map.class))).thenReturn(Mono.empty());
+
+            StepVerifier.create(orchestrator.handleStepProgress(task.getId(), "PARSE", "SUCCESS", Map.of())
+                            .contextWrite(ctx -> ctx.put(TraceContext.TRACE_ID, "dirty-trace")))
+                    .assertNext(saved -> assertEquals(TaskStatus.EXTRACT_RUNNING.name(), saved.getStatus()))
+                    .verifyComplete();
+
+            // 脏条目视为 miss：走 MQ 重抽，不重放、不写库。
+            verify(extractDispatcher).dispatchAll(any(Task.class), any(Map.class));
+            verify(statementWriter, never()).writeStatement(anyString(), anyString(), any());
+        }
+
+        @Test
         @DisplayName("should fall through to extract dispatch when report not found")
         void shouldFallThroughToExtractDispatchWhenReportNotFound() {
             Task task = Task.builder()
