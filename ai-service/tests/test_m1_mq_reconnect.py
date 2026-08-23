@@ -297,6 +297,44 @@ def test_on_message_dispatches_to_worker_queue() -> None:
     assert channel.acked == [] and channel.nacked == []
 
 
+def test_on_message_acks_duplicate_in_flight_delivery() -> None:
+    """M4（审查修复）：在途 (taskId, step) 的重投件直接 ack，不再完整重执行。
+
+    broker 闪断重连后未 ack 的消息重投，而工作线程可能仍在处理原投递
+    （7 分钟 parse）——旧版重投件入队后 parse 重跑、DeepSeek 双倍计费；
+    现重投件直接 ack 丢弃，终态进度由原投递发布（L2 幂等键兜底）。
+    """
+    consumer, _ = _consumer_with_recording_producer()
+    channel = FakeAckChannel()
+    method = SimpleNamespace(routing_key="parse", delivery_tag=7)
+    properties = SimpleNamespace(headers={"traceId": "trace-worker"})
+    body = _valid_task_message().model_dump_json(by_alias=True).encode()
+
+    # 原投递：校验入队 + 在途占位。
+    consumer.on_message(channel, method, properties, body)
+    assert consumer._work_queue.qsize() == 1
+    assert channel.acked == []
+
+    # 同 (taskId, step) 重投（重连后 broker redeliver）：直接 ack 丢弃。
+    consumer.on_message(
+        channel, SimpleNamespace(routing_key="parse", delivery_tag=8), properties, body
+    )
+    assert consumer._work_queue.qsize() == 1
+    assert channel.acked == [8]
+
+    # 原投递处理完成（_process 直调模拟工作线程取出执行）：在途键释放。
+    consumer.connection = None
+    consumer._process(channel, method, _valid_task_message(), "PARSE", "trace-worker")
+    assert consumer._in_flight == set()
+
+    # 后续同 step 投递（L2 重试新消息）正常入队，不被误判为重复。
+    consumer.on_message(
+        channel, SimpleNamespace(routing_key="parse", delivery_tag=9), properties, body
+    )
+    assert consumer._work_queue.qsize() == 2
+    assert channel.acked == [8]
+
+
 def test_process_publishes_success_then_acks_threadsafe() -> None:
     """A successful handler must publish SUCCESS progress and schedule the ack."""
     consumer, producer = _consumer_with_recording_producer()

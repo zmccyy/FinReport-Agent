@@ -103,6 +103,37 @@ def test_generate_success_builds_payload_and_parses_usage() -> None:
     assert "response_format" not in payload
 
 
+def test_generate_clamps_max_tokens_for_capped_models() -> None:
+    """M7（审查修复）：deepseek-chat 的 max_tokens 钳制到 8192 上限。
+
+    默认 model_max_new_tokens=16384（按 reasoning 模型调优）超出
+    deepseek-chat 上限 8192，未钳制的部署每次 generate 都 HTTP 400
+    且 400 不可重试，三步抽取全部 FAILED 且无重试。
+    """
+    recorder = _TransportRecorder(httpx.Response(200, json=_ok_body("{}")))
+    backend = _backend(recorder)  # 默认 model=deepseek-chat
+
+    backend.generate(
+        "抽取三表", max_new_tokens=16384, temperature=0.0, timeout_seconds=30.0
+    )
+
+    payload = json.loads(recorder.requests[0].content)
+    assert payload["max_tokens"] == 8192
+
+
+def test_generate_keeps_max_tokens_for_uncapped_models() -> None:
+    """M7：非钳制模型（reasoning 系）保持调用方传入的 max_tokens。"""
+    recorder = _TransportRecorder(httpx.Response(200, json=_ok_body("{}")))
+    backend = _backend(recorder, _settings(llm_api_model="deepseek-v4-flash"))
+
+    backend.generate(
+        "抽取三表", max_new_tokens=16384, temperature=0.0, timeout_seconds=30.0
+    )
+
+    payload = json.loads(recorder.requests[0].content)
+    assert payload["max_tokens"] == 16384
+
+
 def test_generate_system_prompt_and_json_mode() -> None:
     """system_prompt becomes a system message; json_mode sets response_format."""
     recorder = _TransportRecorder(httpx.Response(200, json=_ok_body("{}")))

@@ -225,6 +225,81 @@ def test_table_recognition_runs_all_pages_without_filter(
     assert [c[0] for c in layout.calls] == [0, 1, 2]
 
 
+def _pdf_bytes(pages: list[str]) -> bytes:
+    """Build a small in-memory text PDF（镜像 conftest._make_pdf 的本地拷贝）。"""
+    import io
+
+    import fitz
+
+    doc = fitz.open()
+    for text in pages:
+        page = doc.new_page(width=595, height=842)
+        page.insert_text((72, 72), text, fontsize=12)
+    buf = io.BytesIO()
+    doc.save(buf)
+    doc.close()
+    return buf.getvalue()
+
+
+def test_table_recognition_falls_back_when_document_has_no_anchor(
+    text_pdf_bytes: bytes,
+) -> None:
+    """H4（审查修复）：无锚点文档（扫描件/标题变体）退回全页识别。
+
+    旧版 ``_last_anchor=-10000`` 使窗口检查永假 → 全文档零表格识别
+    且无日志可查；现文档级预扫无锚点命中时禁用过滤（旧行为）。
+    """
+    layout = _FakeLayout(
+        tables=[TableBlock(bbox=_bbox(5, 5, 100, 50), html="<table></table>")]
+    )
+    page_filter = StatementPageFilter(
+        window=2, amount_threshold=2, anchor_pattern="BALANCE SHEET"
+    )
+    parser = DocumentParser(layout_analyzer=layout, table_page_filter=page_filter)
+
+    document = parser.parse_bytes(text_pdf_bytes, source="uploads/plain.pdf")
+
+    # text_pdf_bytes 无锚点 → 全页识别（两页都调用 layout analyzer）。
+    assert [c[0] for c in layout.calls] == [0, 1]
+    assert document.pages[0].table_blocks
+
+
+def test_statement_page_filter_state_resets_between_documents(
+    keyword_pdf_bytes: bytes,
+) -> None:
+    """H4（审查修复）：单例 parser 的过滤器状态按文档重置。
+
+    旧版 ``_last_anchor`` 跨文档保留：前一份文档的锚点（页 2）会把
+    后一份文档的页 4（距自身锚点页 0 已出窗）误判为候选页，重新
+    引入本过滤器要防的 PP-Structure OOM 路径。
+    """
+    layout = _FakeLayout()
+    page_filter = StatementPageFilter(
+        window=2, amount_threshold=2, anchor_pattern="BALANCE SHEET"
+    )
+    parser = DocumentParser(layout_analyzer=layout, table_page_filter=page_filter)
+
+    # 文档 A：锚点页 0/2（解析后 _last_anchor=2）。
+    parser.parse_bytes(keyword_pdf_bytes, source="uploads/a.pdf")
+    assert [c[0] for c in layout.calls] == [0, 2]
+
+    # 文档 B：锚点仅页 0；页 4 金额密集但距锚点 4 页（窗口=2）。
+    # 若 _last_anchor=2 泄漏，页 4 会被误判为候选（4-2=2 ≤ window）。
+    layout.calls.clear()
+    doc_b = _pdf_bytes(
+        [
+            "BALANCE SHEET 1,234.56 2,345.67",
+            "plain",
+            "plain",
+            "plain",
+            "dense notes 3,456.78 4,567.89",
+        ]
+    )
+    parser.parse_bytes(doc_b, source="uploads/b.pdf")
+
+    assert [c[0] for c in layout.calls] == [0]
+
+
 def test_statement_page_filter_window_and_density() -> None:
     """StatementPageFilter 纯逻辑：窗口过期 + 密度门控。"""
     page_filter = StatementPageFilter(window=2, amount_threshold=2)

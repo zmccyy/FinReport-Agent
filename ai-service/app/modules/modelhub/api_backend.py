@@ -34,6 +34,12 @@ LOGGER = get_logger(__name__)
 # API 路由的 quant 标签（M4.08 后唯一后端；本地 gptq-int4/nf4 已随 GPU 栈移除）。
 QUANT_API = "api"
 
+# 各模型 ``max_tokens`` 上限（M4.10 审查修复 M7）：超出上限即 HTTP 400
+# 且 400 不在可重试状态集——默认 ``model_max_new_tokens=16384``（按
+# reasoning 模型调优）配上 compose 默认 ``deepseek-chat``（上限 8192）
+# 会使每次 generate 都 400，三步抽取全部 FAILED 且无重试。
+_MODEL_MAX_TOKENS_CAPS: dict[str, int] = {"deepseek-chat": 8192}
+
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 
@@ -125,6 +131,17 @@ class DeepSeekBackend:
             # 防御性检查：load() 成功路径必置 _client；显式抛错避免
             # python -O 下 assert 被剥离后出现裸 AttributeError。
             raise AiException("DeepSeek API client failed to initialize")
+
+        # M7：按模型钳制 max_tokens（deepseek-chat 上限 8192，超出即 400）。
+        token_cap = _MODEL_MAX_TOKENS_CAPS.get(self.settings.llm_api_model)
+        if token_cap is not None and max_new_tokens > token_cap:
+            LOGGER.warning(
+                "[DeepSeekBackend] max_tokens %d exceeds model %s cap %d; clamping",
+                max_new_tokens,
+                self.settings.llm_api_model,
+                token_cap,
+            )
+            max_new_tokens = token_cap
 
         payload = self._build_payload(
             prompt,

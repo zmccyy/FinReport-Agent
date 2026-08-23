@@ -9,7 +9,7 @@ parse 产物走 MinIO，check/report 只读 MySQL，进度经 ProgressProducer
 
 import asyncio
 import queue
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import Any, Awaitable, Callable
 
 from app.core.config import Settings
@@ -77,6 +77,13 @@ class TaskConsumer:
         # 工作线程内复用的事件循环——避免每条消息 asyncio.run() 反复
         # 创建/销毁 loop（含 to_thread 线程池无法跨消息复用）。
         self._loop: asyncio.AbstractEventLoop | None = None
+        # M4.10 审查修复 M4：在途 (taskId, step) 去重。broker 闪断重连后
+        # 未 ack 的消息会重投，而工作线程可能仍在处理原投递（7 分钟
+        # parse）——重投件直接 ack 丢弃，避免 parse 重跑与 DeepSeek
+        # 双倍计费；终态进度由原投递发布（L2 幂等键兜底）。入队时占位、
+        # 处理结束（含异常）释放。
+        self._in_flight: set[tuple[str, str]] = set()
+        self._in_flight_lock = Lock()
 
     def configure_channel(self, channel: Any) -> None:
         """Apply the fixed single-message prefetch policy.
@@ -177,35 +184,41 @@ class TaskConsumer:
         handler = self.handlers[method.routing_key]
         assert self._loop is not None
         try:
-            result = self._loop.run_until_complete(handler(task))
-        except Exception as error:
-            LOGGER.exception("Task handler failed routingKey=%s", method.routing_key)
             try:
-                self._publish_progress(
-                    task,
-                    step_name,
-                    "FAILED",
-                    {"error": str(error)},
-                    trace_id,
-                )
-            except Exception:
-                LOGGER.exception(
-                    "Failed to publish task failure progress routingKey=%s",
-                    method.routing_key,
-                )
-                self._nack_threadsafe(channel, method.delivery_tag)
-                return
-        else:
-            try:
-                self._publish_progress(task, step_name, "SUCCESS", result, trace_id)
-            except Exception:
-                LOGGER.exception(
-                    "Failed to publish task success progress routingKey=%s",
-                    method.routing_key,
-                )
-                self._nack_threadsafe(channel, method.delivery_tag)
-                return
-        self._ack_threadsafe(channel, method.delivery_tag)
+                result = self._loop.run_until_complete(handler(task))
+            except Exception as error:
+                LOGGER.exception("Task handler failed routingKey=%s", method.routing_key)
+                try:
+                    self._publish_progress(
+                        task,
+                        step_name,
+                        "FAILED",
+                        {"error": str(error)},
+                        trace_id,
+                    )
+                except Exception:
+                    LOGGER.exception(
+                        "Failed to publish task failure progress routingKey=%s",
+                        method.routing_key,
+                    )
+                    self._nack_threadsafe(channel, method.delivery_tag)
+                    return
+            else:
+                try:
+                    self._publish_progress(task, step_name, "SUCCESS", result, trace_id)
+                except Exception:
+                    LOGGER.exception(
+                        "Failed to publish task success progress routingKey=%s",
+                        method.routing_key,
+                    )
+                    self._nack_threadsafe(channel, method.delivery_tag)
+                    return
+            self._ack_threadsafe(channel, method.delivery_tag)
+        finally:
+            # 在途键释放（M4）：无论成功/失败/进度发布失败，处理已终止，
+            # 后续同 (taskId, step) 投递（L2 重试）应正常入队执行。
+            with self._in_flight_lock:
+                self._in_flight.discard((task.task_id, task.step))
 
     def on_message(self, channel: Any, method: Any, properties: Any, body: bytes) -> None:
         """Validate one delivery and hand it to the worker thread.
@@ -232,6 +245,21 @@ class TaskConsumer:
             LOGGER.exception("Invalid task delivery routingKey=%s", method.routing_key)
             channel.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return
+        # 在途去重（M4）：重投件在原投递处理期间到达 → 直接 ack 丢弃。
+        # 残余竞态（原投递已处理完、ack 失败后才重投）窗口极小，仍可能
+        # 重复执行一次，由 L2 幂等键兜底。
+        with self._in_flight_lock:
+            in_flight_key = (task.task_id, task.step)
+            if in_flight_key in self._in_flight:
+                LOGGER.warning(
+                    "Duplicate redelivery of in-flight task taskId=%s step=%s; "
+                    "acking duplicate, original still processing",
+                    task.task_id,
+                    task.step,
+                )
+                channel.basic_ack(delivery_tag=method.delivery_tag)
+                return
+            self._in_flight.add(in_flight_key)
         self._work_queue.put((channel, method, task, step_name, trace_id))
 
     def _ack_threadsafe(self, channel: Any, delivery_tag: Any) -> None:
@@ -258,7 +286,13 @@ class TaskConsumer:
             operation: A zero-argument callback issuing one channel operation.
         """
         connection = self.connection
-        if connection is None or not connection.is_open:
+        if (
+            connection is None
+            or not connection.is_open
+            # M4：旧 channel 随旧连接关闭，勿把其操作调度到新连接
+            # （getattr 容错 duck-typed 测试桩）。
+            or not getattr(channel, "is_open", True)
+        ):
             LOGGER.warning(
                 "Broker connection lost before ack; delivery will be redelivered"
             )

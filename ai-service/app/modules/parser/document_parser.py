@@ -73,6 +73,25 @@ class StatementPageFilter:
         )
         self._last_anchor = -10_000
 
+    def reset(self) -> None:
+        """Reset per-document state (M4.10 审查修复 H4).
+
+        ``DocumentParser`` 是模块级单例（parser/handler.py），``_last_anchor``
+        若跨文档保留，前一份长文档的锚点会把后一份文档的早前页误判为
+        候选页（重新引入本过滤器要防的 PP-Structure OOM 路径）。
+        每次解析新文档前由 ``parse_bytes`` 调用。
+        """
+        self._last_anchor = -10_000
+
+    def anchor_hit(self, page_text: str) -> bool:
+        """Check whether a page's text layer matches the anchor regex.
+
+        Used by ``DocumentParser.parse_bytes`` 的文档级预扫：全文档无任何
+        锚点命中（扫描件/标题变体）时退回全页识别旧行为（H4：否则
+        ``_last_anchor=-10000`` 使窗口检查永假，零表格识别且无日志）。
+        """
+        return bool(self._anchor_re.search(page_text))
+
     def is_candidate(self, page_index: int, page_text: str) -> bool:
         """Decide whether table recognition should run on this page.
 
@@ -192,11 +211,32 @@ class DocumentParser:
             doc.close()
             raise AiException("PDF is encrypted; provide an unencrypted file")
 
+        # M4.10 审查修复 H4：过滤器按文档重置（单例 parser 的
+        # ``_last_anchor`` 不得跨文档保留）；文档级预扫无任何锚点命中
+        # （扫描件/标题变体）时退回全页识别旧行为——否则窗口检查永假，
+        # 全文档零表格识别且无日志可查。取舍：无文本层的大型扫描件
+        # 退回全页识别后 OOM 风险回归（旧行为），相对「零识别 + 根因
+        # 不可见」是更优失败模式；生产 enable_ocr=False 不变。
+        use_filter = self.table_page_filter is not None
+        if use_filter:
+            self.table_page_filter.reset()
+            use_filter = any(
+                self.table_page_filter.anchor_hit(doc.load_page(i).get_text("text") or "")
+                for i in range(doc.page_count)
+            )
+            if not use_filter:
+                LOGGER.warning(
+                    "No statement anchor found in document source=%s pages=%d; "
+                    "falling back to full-page table recognition (legacy behavior)",
+                    source,
+                    doc.page_count,
+                )
+
         pages: list[Page] = []
         try:
             for index in range(doc.page_count):
                 raw = self._extract_page(fitz, doc, index)
-                pages.append(self._build_page(raw))
+                pages.append(self._build_page(raw, use_filter))
         finally:
             doc.close()
 
@@ -260,11 +300,14 @@ class DocumentParser:
             LOGGER.warning("Failed to render page image index=%s", page.number)
             return None
 
-    def _build_page(self, raw: _ParsedPage) -> Page:
+    def _build_page(self, raw: _ParsedPage, use_filter: bool = True) -> Page:
         """Assemble a Page from text blocks plus optional layout/OCR results.
 
         Args:
             raw: The carrier returned by _extract_page.
+            use_filter: Whether the statement-page filter applies to this
+                document (False = legacy full-page behavior, see
+                ``parse_bytes`` 的文档级预扫).
 
         Returns:
             A fully populated Page.
@@ -282,7 +325,7 @@ class DocumentParser:
         if (
             self.layout_analyzer is not None
             and raw.image_bytes is not None
-            and self._is_table_candidate(raw.index, raw.text)
+            and self._is_table_candidate(raw.index, raw.text, use_filter)
         ):
             try:
                 table_blocks = self.layout_analyzer.analyze_page(
@@ -357,18 +400,20 @@ class DocumentParser:
             return False
         return not raw.text.strip()
 
-    def _is_table_candidate(self, page_index: int, page_text: str) -> bool:
+    def _is_table_candidate(self, page_index: int, page_text: str, use_filter: bool = True) -> bool:
         """Check whether table recognition should run on this page.
 
         Args:
             page_index: 0-based page index (anchor window bookkeeping).
             page_text: The page's raw text layer.
+            use_filter: Whether the filter applies to this document
+                (False = legacy full-page behavior for anchor-less docs).
 
         Returns:
-            True when no filter is configured (legacy behavior) or the page
-            passes the statement-page filter.
+            True when no filter is configured/applies (legacy behavior) or
+            the page passes the statement-page filter.
         """
-        if self.table_page_filter is None:
+        if not use_filter or self.table_page_filter is None:
             return True
         return self.table_page_filter.is_candidate(page_index, page_text)
 
