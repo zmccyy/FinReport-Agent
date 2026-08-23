@@ -55,7 +55,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import re
 import sys
 import time
 from dataclasses import dataclass, field
@@ -65,6 +64,12 @@ from typing import Any
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPOSITORY_ROOT / "ai-service"))
+
+# 科目名规范化单源化（M4.10 审查修复 L2）：与抽取链路、GT 重建共用
+# 同一实现，消除「GT 剥尾随附注号 / 预测不剥」的口径分叉。
+from app.modules.extractor.normalize import (  # noqa: E402
+    normalize_item_name as _normalize_item_name,
+)
 
 # ---------------------------------------------------------------------------
 # Data model
@@ -101,29 +106,6 @@ class StatementMetrics:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _normalize_item_name(raw: str) -> str:
-    """科目名规范化——与 app/modules/extractor/handler.normalize_item_name 同一套规则。
-
-    M4.10 复测：LLM 输出带表格行号（一、营业收入）、行性质前缀
-    （减：营业成本）、括号注释（（损失以…号填列））与识别空格
-    （现 金）。GT 重建时已规范，此函数对 GT 幂等，对预测侧清洗。
-    """
-    name = raw.strip()
-    mark = name.find("号填")
-    if mark != -1:
-        paren = name.rfind("（", 0, mark)
-        name = name[:paren] if paren != -1 else name[:mark]
-    name = re.sub(
-        r"^(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十]+）|\d+[、.]|(?:减|加|其中)：)",
-        "",
-        name,
-    )
-    name = re.sub(r"（[^）]*）", "", name)
-    name = name.replace("（", "").replace("）", "")
-    name = name.replace("－", "-").replace("—", "-").replace("“", "").replace("”", "")
-    return re.sub(r"\s+", "", name).strip()
 
 
 def _items_from_list(payload: list[dict[str, Any]]) -> list[StatementItem]:
@@ -313,10 +295,24 @@ def _extract_with_backend_pipeline(
     deadline = time.monotonic() + timeout
     last_status = ""
     task_status = ""
+    consecutive_errors = 0
     while time.monotonic() < deadline:
-        task_resp = requests.get(
-            f"{backend_url}/api/v1/tasks/{task_id}", headers=auth_headers, timeout=15
-        )
+        # M4.10 审查修复 L1：PARSE 阶段后端 CPU 打满时一次 ReadTimeout
+        # 即未捕获异常中止整个验收运行；镜像 e2e_m4.py _wait_task 的
+        # 容错模式（连续网络失败 >20 次才中止，deadline 仍兜底）。
+        try:
+            task_resp = requests.get(
+                f"{backend_url}/api/v1/tasks/{task_id}", headers=auth_headers, timeout=15
+            )
+        except requests.RequestException as error:
+            consecutive_errors += 1
+            if consecutive_errors > 20:
+                raise RuntimeError(
+                    f"task query failed after {consecutive_errors} consecutive errors: {error}"
+                ) from error
+            time.sleep(3)
+            continue
+        consecutive_errors = 0
         if task_resp.status_code != 200:
             raise RuntimeError(
                 f"task query failed HTTP {task_resp.status_code}: {task_resp.text[:200]}"
@@ -374,6 +370,38 @@ def _extract_with_backend_pipeline(
     return result
 
 
+def _report_granularity_coverage(predicted: dict[str, list[StatementItem]]) -> None:
+    """按 (scope, period) 统计三表预测行数并检测契约回归（M4.10 审查修复 M2）。
+
+    F1 门槛在 GT 粒度（合并+本期）上计算；抽取器若回归为丢失全部
+    上期/母公司输出（scope/period 注入失效、JSON 截断），粒度过滤后
+    指标对该契约回归完全无感——此处显式报告覆盖率并在整体缺失时告警，
+    不改变门槛语义（粒度过滤为决策记录标注的有意行为）。
+    """
+    cells: dict[tuple[str, str], int] = {}
+    for items in predicted.values():
+        for item in items:
+            key = (item.scope, item.period)
+            cells[key] = cells.get(key, 0) + 1
+    summary = ", ".join(
+        f"{scope or '∅'}×{period or '∅'}={count}"
+        for (scope, period), count in sorted(cells.items())
+    )
+    print(f"[eval] 粒度覆盖（scope×period → 行数）：{summary or '预测为空'}")
+    scopes = {scope for scope, _ in cells}
+    periods = {period for _, period in cells}
+    if periods and "上期" not in periods:
+        print(
+            "[eval][WARNING] 全部预测缺失「上期」行——疑似 period 注入失效或 "
+            "JSON 截断（契约回归，当前 F1 门槛不覆盖）"
+        )
+    if scopes and "母公司" not in scopes:
+        print(
+            "[eval][WARNING] 全部预测缺失「母公司」行——疑似 scope 注入失效或 "
+            "JSON 截断（契约回归，当前 F1 门槛不覆盖）"
+        )
+
+
 def _filter_to_truth_granularity(
     predicted: dict[str, list[StatementItem]],
     truth: dict[str, list[StatementItem]],
@@ -405,6 +433,17 @@ def _filter_to_truth_granularity(
                 f"[eval] {st_type}: 按粒度筛选 scope={target_scope} "
                 f"period={target_period}（{len(pred_items)} → {len(kept)} 行）"
             )
+            if not kept and pred_items:
+                # M4.10 审查修复 M2：目标粒度预测为空时 F1 恒为 0，
+                # 打印可用粒度作根因提示（避免「达标 0.9106 却丢了上期列」
+                # 类契约回归静默通过）。
+                available = sorted(
+                    {f"{p.scope or '∅'}×{p.period or '∅'}" for p in pred_items}
+                )
+                print(
+                    f"[eval][WARNING] {st_type}: 目标粒度 {target_scope}×{target_period} "
+                    f"预测为 0 行（可用粒度：{', '.join(available)}）——该表 F1 将为 0"
+                )
             filtered[st_type] = kept
         else:
             filtered[st_type] = list(pred_items)
@@ -562,6 +601,7 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
             return 1
         llm_mode = f"真实 E2E 管道（DeepSeek API，backend={args.backend_url}）"
+        _report_granularity_coverage(predicted)
         predicted = _filter_to_truth_granularity(predicted, truth_statements)
 
     metrics_list: list[StatementMetrics] = []

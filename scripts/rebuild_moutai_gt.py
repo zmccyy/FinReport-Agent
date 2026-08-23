@@ -36,6 +36,13 @@ import fitz  # pymupdf
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_PDF = REPOSITORY_ROOT / "data" / "sample_reports" / "600519_贵州茅台_2025年年度报告.pdf"
 
+# 科目名规范化单源化（M4.10 审查修复 L2/L4）：与抽取链路、F1 评估共用
+# 同一实现（含尾随附注号剥离与未闭合括号碎片截断），消除三份拷贝分叉。
+sys.path.insert(0, str(REPOSITORY_ROOT / "ai-service"))
+from app.modules.extractor.normalize import (  # noqa: E402
+    normalize_item_name as normalize_name,
+)
+
 _NUM_RE = re.compile(r"-?\d[\d,]*\.\d{2}")
 _PAGE_HEADER_RE = re.compile(r"(年度报告|/\s*\d{1,3}\s*$)")
 # 段边界标题（出现即切换报表上下文；含“母公司”即退出合并段）。
@@ -58,36 +65,6 @@ _SKIP_ROWS = {
 }
 # 单行纯附注号（如 "4"、"60(1)"）。
 _NOTE_ONLY_RE = re.compile(r"^\d{1,3}(\(\d+\))?$")
-
-
-def normalize_name(raw: str) -> str:
-    """与抽取链路一致的科目名规范化（去行号/前缀/括号注释/空格）。
-
-    额外处理文本层跨行碎片：括号注释被拆行后只剩孤括号（如
-    ``列）投资收益（损失以-号填``），按 ``号填`` 截断清理。
-    """
-    name = raw.strip()
-    # 表外行（每股收益元/股 等）不构成科目——caller 先行排除。
-    # 括号注释碎片截断：含“号填列”字样时整段丢弃；若有左括号则从括号
-    # 起截（“营业利润（亏损以“－”号填列）” → “营业利润”）。
-    mark = name.find("号填")
-    if mark != -1:
-        paren = name.rfind("（", 0, mark)
-        name = name[:paren] if paren != -1 else name[:mark]
-    # 行号编号：一、二、… / （一）（二） / 1. 2. / 1、2、
-    name = re.sub(r"^[一二三四五六七八九十]+、", "", name)
-    name = re.sub(r"^（[一二三四五六七八九十]+）", "", name)
-    name = re.sub(r"^\d+[、.]", "", name)
-    # 行性质前缀：减：/加：/其中：
-    name = re.sub(r"^(减|加|其中)：", "", name)
-    # 括号注释（损失以“－”号填列 等）整体去除；残留孤括号剔除
-    name = re.sub(r"（[^）]*）", "", name)
-    name = name.replace("（", "").replace("）", "")
-    # 全角符号转半角
-    name = name.replace("－", "-").replace("—", "-").replace("“", "").replace("”", "")
-    # 名称内部空格（表格识别拆分：现 金 → 现金）
-    name = re.sub(r"\s+", "", name)
-    return name
 
 
 def _row_is_headerish(line: str) -> bool:
@@ -194,7 +171,7 @@ def extract_full_ground_truth(pdf_path: Path) -> dict[str, list[dict]]:
                 continue
             paired.sort(key=lambda w: (w[1], w[0]))
             raw_name = "".join(w[4] for w in paired)
-            raw_name = re.sub(r"\d{1,3}$", "", raw_name)  # 科目名尾随附注号
+            # 尾随附注号剥离已并入 normalize_name（共享实现），此处不再单独处理。
             # 表外行（每股收益等，单位不是元）不构成三表科目
             if not raw_name or "元/股" in raw_name or "元/份" in raw_name:
                 continue
