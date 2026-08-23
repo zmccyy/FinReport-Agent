@@ -31,6 +31,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app.core.exceptions import AiException
 from app.modules.extractor.extractor import Extractor
 from app.modules.extractor.prompts import build_extract_prompt, build_retry_prompt
 from app.schemas.statement import (
@@ -403,16 +404,36 @@ def extract_with_retry(
         to ``result``; check ``validation.is_valid`` to decide.
     """
     # --- 第一次抽取 ---
-    first_result = extractor.extract(
-        table_html,
-        statement_type,
-        report_period=report_period,
-        company_code=company_code,
-        unit=unit,
-        scope=scope,
-        max_new_tokens=max_new_tokens,
-        timeout_seconds=timeout_seconds,
-    )
+    # M4.10 审查修复 M5：API 截断（content 空 + finish_reason=length）等
+    # AiException 若直穿，任务立即 FAILED——旧行为（empty model output）
+    # 反而有 0.1 温度重试的挽回机会。首抽异常转为失败结果走重试链；
+    # 重试轮仍异常则上抛（终态 FAILED → L2 任务级重试，避免 success=false
+    # 假成功触发「步骤 SUCCESS 但无数据」的 CHECK 饥饿路径）。
+    try:
+        first_result = extractor.extract(
+            table_html,
+            statement_type,
+            report_period=report_period,
+            company_code=company_code,
+            unit=unit,
+            scope=scope,
+            max_new_tokens=max_new_tokens,
+            timeout_seconds=timeout_seconds,
+        )
+    except AiException as error:
+        LOGGER.warning(
+            "[extract_with_retry] first attempt raised type=%s error=%s; retrying",
+            statement_type.value,
+            error,
+        )
+        first_result = ExtractionResult(
+            statement_type=statement_type,
+            raw_text="",
+            prompt_tokens=0,
+            completion_tokens=0,
+            latency_ms=0.0,
+            error=f"generation failed: {error}",
+        )
     first_validation = validator.validate(first_result)
     if first_validation.is_valid:
         LOGGER.info(

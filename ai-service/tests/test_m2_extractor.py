@@ -436,6 +436,76 @@ def test_coerce_to_statement_defaults_currency_and_unit() -> None:
 
 
 # ---------------------------------------------------------------------------
+# normalize_item_name（M4.10 审查修复 L2/L3/L4：单源化 + 校验前规范化）
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_item_name_strips_prefixes_parens_and_spaces() -> None:
+    """行号/行性质前缀/括号注释/识别空格清理（原有规则保持不变）。"""
+    from app.modules.extractor.normalize import normalize_item_name
+
+    assert normalize_item_name("一、营业收入") == "营业收入"
+    assert normalize_item_name("减：营业成本") == "营业成本"
+    assert normalize_item_name("其中：利息收入") == "利息收入"
+    assert normalize_item_name("现 金") == "现金"
+    assert normalize_item_name("营业利润（亏损以“－”号填列）") == "营业利润"
+
+
+def test_normalize_item_name_strips_trailing_note_number() -> None:
+    """L2（审查修复）：尾随附注号剥离——与 GT 重建规则对齐。
+
+    此前三份规范化拷贝分叉（GT 剥而预测不剥），严格相等匹配下
+    「货币资金1」永远匹配不上 GT「货币资金」。
+    """
+    from app.modules.extractor.normalize import normalize_item_name
+
+    assert normalize_item_name("货币资金1") == "货币资金"
+    assert normalize_item_name("应收账款60") == "应收账款"
+    assert normalize_item_name("营业收入60(1)") == "营业收入60(1)"  # 半角括号非注释，不剥
+
+
+def test_normalize_item_name_truncates_unmatched_open_paren() -> None:
+    """L4（审查修复）：未闭合开括号碎片截断。
+
+    GT 重建曾从跨行碎片「信用减值损失（损失以“-」产出损坏科目名
+    「信用减值损失损失以-」，模型输出正确名称也匹配不上。
+    """
+    from app.modules.extractor.normalize import normalize_item_name
+
+    assert normalize_item_name("信用减值损失（损失以-") == "信用减值损失"
+    assert normalize_item_name("投资收益（损失以“-") == "投资收益"
+    # 完整括号对不受影响。
+    assert normalize_item_name("信用减值损失（损失以“-”号填列）") == "信用减值损失"
+
+
+def test_coerce_to_statement_normalizes_before_validation() -> None:
+    """L3（审查修复）：规范化在校验之前，「其中：利息收入」与「利息收入」
+    归一后同名 → validator 的 duplicate_item 检查能检出（旧版规范化在
+    校验之后，两行同名不同值绕过去重双双落库）。"""
+    from app.modules.extractor.validator import Validator
+
+    parsed = {
+        "report_period": "2024-12-31",
+        "statements": {
+            "balance_sheet": [
+                {"item": "货币资金", "value": 1.0},
+                {"item": "利息收入", "value": 2.0},
+                {"item": "其中：利息收入", "value": 3.0},
+            ]
+        },
+    }
+    stmt = Extractor._coerce_to_statement(parsed, StatementType.BALANCE_SHEET)
+    items = stmt.statements[StatementType.BALANCE_SHEET]
+    # 规范化已在校验前完成：两行同名「利息收入」。
+    assert [it.item for it in items] == ["货币资金", "利息收入", "利息收入"]
+
+    result = ExtractionResult(statement_type=StatementType.BALANCE_SHEET, statement=stmt)
+    validation = Validator().validate(result)
+    codes = [issue.code for issue in validation.issues]
+    assert "duplicate_item" in codes
+
+
+# ---------------------------------------------------------------------------
 # Extractor.extract (integration with stub hub)
 # ---------------------------------------------------------------------------
 

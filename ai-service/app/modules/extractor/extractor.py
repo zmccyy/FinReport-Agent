@@ -19,6 +19,7 @@ import json
 import re
 from typing import Any
 
+from app.modules.extractor.normalize import normalize_item_name
 from app.modules.extractor.prompts import build_extract_prompt
 from app.modules.modelhub.modelhub import ModelHub
 from app.schemas.statement import (
@@ -342,7 +343,16 @@ class Extractor:
         for idx, raw_item in enumerate(raw_items):
             if not isinstance(raw_item, dict):
                 raise ValueError(f"statements[{expected_type.value}][{idx}] must be an object")
-            items.append(StatementItem.model_validate(raw_item))
+            item = StatementItem.model_validate(raw_item)
+            # M4.10 审查修复 L3：规范化必须先于 validator 检查——
+            # 「利息收入」与「其中：利息收入」归一后同名，duplicate_item
+            # 去重检查才能检出（否则两行同名不同值双双落库）；规范化后
+            # 为空的行（如孤立的「（一）」）不构成科目，直接丢弃。
+            normalized = normalize_item_name(item.item)
+            if not normalized:
+                continue
+            item.item = normalized
+            items.append(item)
 
         return FinancialStatement(
             report_period=report_period,

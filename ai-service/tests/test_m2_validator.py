@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from app.core.config import Settings
+from app.core.exceptions import AiException
 from app.modules.extractor.extractor import Extractor
 from app.modules.extractor.prompts import build_extract_prompt, build_retry_prompt
 from app.modules.extractor.validator import (
@@ -644,6 +645,89 @@ def test_extract_with_retry_first_attempt_business_rule_error_triggers_retry() -
     assert validation.is_valid is True
     assert result.success
     assert result.statement.report_period == "2024-12-31"
+
+
+def test_extract_with_retry_recovers_from_first_attempt_ai_exception() -> None:
+    """M5（审查修复）：首抽 AiException（API 截断）转入重试链而非直穿 FAILED。
+
+    旧版截断 AiException 同时绕过 backend 重试循环（只捕 httpx 异常）
+    与 extract_with_retry 验证重试链，token 预算耗尽即任务 FAILED；
+    现首抽异常构造失败结果，走 0.1 温度重试挽回。
+    """
+
+    class _FlakyHub:
+        """Duck-typed hub: first generate raises, later ones return payloads."""
+
+        def __init__(self, error: Exception, responses: list[str]) -> None:
+            self.settings = Settings()
+            self._pending_error = error
+            self._responses = list(responses)
+            self.generate_calls: list[dict[str, Any]] = []
+
+        def generate(self, prompt: str, **kwargs: Any) -> GenerateResult:
+            self.generate_calls.append({"prompt": prompt, **kwargs})
+            if self._pending_error is not None:
+                error = self._pending_error
+                self._pending_error = None
+                raise error
+            return GenerateResult(
+                text=self._responses.pop(0) if self._responses else "",
+                prompt_tokens=12,
+                completion_tokens=34,
+                latency_ms=100.0,
+            )
+
+    hub = _FlakyHub(
+        AiException(
+            "DeepSeek API output truncated: content empty with "
+            "finish_reason=length (reasoning consumed the token budget)"
+        ),
+        [_bs_payload()],
+    )
+    extractor = Extractor(hub)
+    validator = Validator()
+
+    result, validation = extract_with_retry(
+        extractor,
+        validator,
+        "<table></table>",
+        StatementType.BALANCE_SHEET,
+    )
+
+    assert len(hub.generate_calls) == 2
+    assert validation.is_valid is True
+    assert result.success
+    assert result.statement is not None
+
+
+def test_extract_with_retry_propagates_retry_attempt_ai_exception() -> None:
+    """M5（审查修复）：重试轮仍抛 AiException 时上抛（终态 FAILED 走 L2 重试）。
+
+    不吞重试异常：返回 success=false 假成功会触发「步骤 SUCCESS 但
+    StatementWriter 跳过写库」的 CHECK 饥饿路径（同 H2 病理）。
+    """
+
+    class _AlwaysRaisingHub:
+        def __init__(self, error: Exception) -> None:
+            self.settings = Settings()
+            self._error = error
+            self.generate_calls: list[dict[str, Any]] = []
+
+        def generate(self, prompt: str, **kwargs: Any) -> GenerateResult:
+            self.generate_calls.append({"prompt": prompt, **kwargs})
+            raise self._error
+
+    hub = _AlwaysRaisingHub(AiException("DeepSeek API output truncated"))
+    extractor = Extractor(hub)
+    validator = Validator()
+
+    with pytest.raises(AiException, match="truncated"):
+        extract_with_retry(
+            extractor,
+            validator,
+            "<table></table>",
+            StatementType.BALANCE_SHEET,
+        )
 
 
 def test_extract_with_retry_passes_overrides_to_first_attempt() -> None:
