@@ -350,6 +350,247 @@ def test_select_table_uses_text_fallback_for_tableless_page() -> None:
     assert scope == "合并"
 
 
+def test_select_table_cuts_parent_tables_on_same_page() -> None:
+    """M3（审查修复）：合并/母公司标题同页时，母公司表不得以合并口径并入。
+
+    旧版 start 分支（仅取合并标题下方全部表）遮蔽 end 分支的 y 切分，
+    母公司标题下方的母公司表会被并入合并段。
+    """
+    merged_is = (
+        "<table><tr><td>营业收入</td><td>1688</td></tr>"
+        "<tr><td>净利润</td><td>853</td></tr></table>"
+    )
+    parent_is = "<table><tr><td>母公司营业收入</td><td>983</td></tr></table>"
+    document = Document(
+        source="uploads/1/demo.pdf",
+        page_count=1,
+        pages=[
+            Page(
+                page_index=0,
+                width=595,
+                height=842,
+                text_blocks=[
+                    TextBlock(bbox=BoundingBox(x0=0, y0=0, x1=200, y1=10), text="合并利润表"),
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=100, x1=200, y1=110), text="母公司利润表"
+                    ),
+                ],
+                table_blocks=[
+                    TableBlock(bbox=BoundingBox(x0=0, y0=20, x1=100, y1=90), html=merged_is),
+                    TableBlock(
+                        bbox=BoundingBox(x0=0, y0=120, x1=100, y1=180), html=parent_is
+                    ),
+                ],
+            ),
+        ],
+    )
+    selected = select_table(document, StatementType.INCOME_STATEMENT)
+    assert selected is not None
+    pages, merged_html, scope = selected
+    assert pages == [0]
+    assert "营业收入" in merged_html
+    assert "母公司营业收入" not in merged_html
+    assert scope == "合并"
+
+
+def test_select_table_implicit_boundary_when_parent_title_missing() -> None:
+    """H1（审查修复）：母公司标题缺失时，下一张报表标题作为隐式段边界。
+
+    旧版 end_page=None 会把起始页之后到文档末尾的全部表格（母公司表、
+    附注表）并入合并段。
+    """
+    bs_html = (
+        "<table><tr><td>货币资金</td><td>100</td></tr>"
+        "<tr><td>资产总计</td><td>500</td></tr></table>"
+    )
+    bs_tail = "<table><tr><td>负债合计</td><td>300</td></tr></table>"
+    is_html = "<table><tr><td>营业收入</td><td>1688</td></tr></table>"
+    notes_html = "<table><tr><td>附注说明</td><td>x</td></tr></table>"
+    document = Document(
+        source="uploads/1/demo.pdf",
+        page_count=4,
+        pages=[
+            Page(
+                page_index=0,
+                width=595,
+                height=842,
+                text_blocks=[
+                    TextBlock(bbox=BoundingBox(x0=0, y0=0, x1=200, y1=10), text="合并资产负债表")
+                ],
+                table_blocks=[
+                    TableBlock(bbox=BoundingBox(x0=0, y0=20, x1=100, y1=90), html=bs_html)
+                ],
+            ),
+            Page(
+                page_index=1,
+                width=595,
+                height=842,
+                table_blocks=[
+                    TableBlock(bbox=BoundingBox(x0=0, y0=0, x1=100, y1=90), html=bs_tail)
+                ],
+            ),
+            Page(
+                page_index=2,
+                width=595,
+                height=842,
+                text_blocks=[
+                    TextBlock(bbox=BoundingBox(x0=0, y0=0, x1=200, y1=10), text="合并利润表")
+                ],
+                table_blocks=[
+                    TableBlock(bbox=BoundingBox(x0=0, y0=20, x1=100, y1=90), html=is_html)
+                ],
+            ),
+            Page(
+                page_index=3,
+                width=595,
+                height=842,
+                table_blocks=[
+                    TableBlock(bbox=BoundingBox(x0=0, y0=0, x1=100, y1=90), html=notes_html)
+                ],
+            ),
+        ],
+    )
+    selected = select_table(document, StatementType.BALANCE_SHEET)
+    assert selected is not None
+    pages, merged_html, scope = selected
+    # 段在「合并利润表」页截断：起始页 + 续页，利润表/附注页排除。
+    assert pages == [0, 1]
+    assert "资产总计" in merged_html and "负债合计" in merged_html
+    assert "营业收入" not in merged_html
+    assert "附注说明" not in merged_html
+    assert scope == "合并"
+
+
+def test_select_table_density_fallback_when_no_end_titles() -> None:
+    """H1（审查修复）：六类标题均缺失时按关键词密度收窄，远端附注页不并入。
+
+    顺序扫描间隔 >1 页无命中即停止——后续附注页即使含关键词（如
+    「经营活动产生的现金流量」的附注讨论）也不得扩展段尾。
+    """
+    cf_head = "<table><tr><td>经营活动产生的现金流量净额</td><td>61</td></tr></table>"
+    cf_tail = "<table><tr><td>现金及现金等价物净增加额</td><td>52</td></tr></table>"
+    notes_far = "<table><tr><td>经营活动产生的现金流量附注</td><td>x</td></tr></table>"
+    document = Document(
+        source="uploads/1/demo.pdf",
+        page_count=4,
+        pages=[
+            Page(
+                page_index=0,
+                width=595,
+                height=842,
+                text_blocks=[
+                    TextBlock(bbox=BoundingBox(x0=0, y0=0, x1=200, y1=10), text="合并现金流量表")
+                ],
+                table_blocks=[
+                    TableBlock(bbox=BoundingBox(x0=0, y0=20, x1=100, y1=90), html=cf_head)
+                ],
+            ),
+            Page(
+                page_index=1,
+                width=595,
+                height=842,
+                table_blocks=[
+                    TableBlock(bbox=BoundingBox(x0=0, y0=0, x1=100, y1=90), html=cf_tail)
+                ],
+            ),
+            # page2：间隔页（无关键词、无表格）。
+            Page(page_index=2, width=595, height=842),
+            # page3：远端附注页，文本含 CF 关键词——不得扩展段尾。
+            Page(
+                page_index=3,
+                width=595,
+                height=842,
+                text_blocks=[
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=0, x1=300, y1=10),
+                        text="附注：经营活动产生的现金流量说明",
+                    )
+                ],
+                table_blocks=[
+                    TableBlock(bbox=BoundingBox(x0=0, y0=20, x1=100, y1=90), html=notes_far)
+                ],
+            ),
+        ],
+    )
+    selected = select_table(document, StatementType.CASH_FLOW)
+    assert selected is not None
+    pages, merged_html, scope = selected
+    assert pages == [0, 1]
+    assert "经营活动产生的现金流量净额" in merged_html
+    assert "现金及现金等价物净增加额" in merged_html
+    assert "附注" not in merged_html
+    assert scope == "合并"
+
+
+def test_fallback_rebuild_excludes_above_title_and_glued_notes() -> None:
+    """M1（审查修复）：降级重建的标题边界 / 附注号粘值 / 熔合行防护。
+
+    - 标题上方上一报表尾块（利润表尾「综合收益总额」）不进入重建；
+    - 「资产处置收益53553,106,625.19」类粘值行取真实金额 553,106,625.19
+      （严格千分位分组跳过非法前导组「53553」），残留附注号被剥离；
+    - 多名称熔合长块（>30 字符）直接丢弃，宁缺勿错。
+    """
+    document = Document(
+        source="uploads/1/demo.pdf",
+        page_count=1,
+        pages=[
+            Page(
+                page_index=0,
+                width=595,
+                height=842,
+                text_blocks=[
+                    # 利润表尾块（位于 CF 标题上方，应被 min_y0 排除）。
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=50, x1=300, y1=60),
+                        text="六、综合收益总额85,305,341,965.73",
+                    ),
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=100, x1=200, y1=110),
+                        text="合并现金流量表",
+                    ),
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=110, x1=300, y1=120),
+                        text="销售商品、提供劳务收到的现金 183,990,403,487.80",
+                    ),
+                    # 附注号 53 与金额粘连：真实金额 553,106,625.19。
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=130, x1=300, y1=140),
+                        text="资产处置收益53553,106,625.19",
+                    ),
+                    # 多名称熔合块（~40 字符）：应被长度上限丢弃。
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=150, x1=400, y1=160),
+                        text=(
+                            "收到再保业务现金净额保户储金及投资款净增加额"
+                            "收取利息、手续费及佣金的现金2,525,372,050.12"
+                        ),
+                    ),
+                    TextBlock(
+                        bbox=BoundingBox(x0=0, y0=170, x1=300, y1=180),
+                        text="经营活动产生的现金流量净额 61,522,204,989.35",
+                    ),
+                ],
+            ),
+        ],
+    )
+    selected = select_table(document, StatementType.CASH_FLOW)
+    assert selected is not None
+    _, merged_html, _ = selected
+    # 上一报表尾块被排除。
+    assert "综合收益总额" not in merged_html
+    # 正常行保留。
+    assert "销售商品、提供劳务收到的现金" in merged_html
+    assert "183990403487.80" in merged_html
+    assert "61522204989.35" in merged_html
+    # 粘值行：取真实金额并剥残留附注号。
+    assert "资产处置收益" in merged_html
+    assert "553106625.19" in merged_html
+    assert "53553106625.19" not in merged_html
+    # 熔合长块丢弃。
+    assert "收到再保" not in merged_html
+    assert "2525372050.12" not in merged_html
+
+
 def test_extract_report_period_variants() -> None:
     """Cover title maps to the A-share report end date."""
     assert extract_report_period(make_document(title="2024年年度报告")) == "2024-12-31"

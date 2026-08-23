@@ -23,6 +23,7 @@ from app.core.config import Settings
 from app.core.exceptions import AiException
 from app.core.minio_client import MinioObjectClient, ObjectStore
 from app.modules.extractor.extractor import Extractor
+from app.modules.extractor.normalize import normalize_item_name
 from app.modules.extractor.validator import (
     ValidationResult,
     Validator,
@@ -30,7 +31,7 @@ from app.modules.extractor.validator import (
 )
 from app.modules.modelhub.modelhub import ModelHub, get_modelhub
 from app.modules.parser.handler import parsed_object_key
-from app.schemas.document import Document, TableBlock
+from app.schemas.document import Document, Page
 from app.schemas.statement import ExtractionResult, StatementType
 from app.schemas.task import TaskMessage
 from app.utils.logger import get_logger
@@ -87,33 +88,28 @@ _PARENT_TITLES: dict[str, str] = {
     "income_statement": "母公司利润表",
     "cash_flow": "母公司现金流量表",
 }
-# 文本降级表格重建：取值正则（科目行中的金额）。
-_NUM_VALUE_RE = re.compile(r"(-?\d[\d,]*\.\d{2})")
+# 全部六类报表标题（H1 隐式边界）：当前报表的合并标题之外，段内出现
+# 任一其它标题（正常文档序中即当前报表的母公司标题；缺失时为下一张
+# 报表的合并/母公司标题）即视为段终止，防止把全文档尾并入合并段。
+_ALL_TITLES: tuple[str, ...] = (*_MERGED_TITLES.values(), *_PARENT_TITLES.values())
+# H1 兜底：无任何终止标题时按关键词密度收窄段尾的硬上限（起始页之后
+# 允许的最大跨页数；三表实际跨度 2-4 页，7 页留余量并约束 prompt 体积）。
+_MAX_SEGMENT_SPAN = 7
+# 文本降级表格重建：取值正则（科目行中的金额）。严格千分位分组
+# （M4.10 审查修复 M1）：「资产处置收益53553,106,625.19」类附注号
+# 粘值中，前导组「53553」不是合法千分位分组，正则将从第 2 位起命中
+# 真实金额 553,106,625.19，残留附注号由名称尾随剥号规则清除。无千分
+# 位的小值行（如「500.00」）不再匹配——降级路径宁缺勿错。
+_NUM_VALUE_RE = re.compile(r"(-?\d{1,3}(?:,\d{3})+\.\d{2})")
+# 降级重建名称长度上限：超过视为多名称块熔合特征（如 64/65 页
+# 「收到再保业务现金净额保户储金及投资款净增加额…」整块熔合），
+# 无列几何不可拆分，跳过以避免错误配对（宁缺勿错）。
+_FALLBACK_NAME_MAX_LEN = 30
 
-# 科目名规范化（抽取结果后处理，M4.10 F1 复测：LLM 原样保留表格行号
-# “一、营业收入”、行性质前缀“减：营业成本”、括号注释“（损失以…号填列）”
-# 与识别空格“现 金”，与 benchmark 科目名对不齐）。
-_NAME_PREFIX_RE = re.compile(r"^(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十]+）|\d+[、.]|(?:减|加|其中)：)")
-_NAME_PAREN_RE = re.compile(r"（[^）]*）")
-
-
-def normalize_item_name(raw: str) -> str:
-    """去行号/行性质前缀/括号注释/全角符号/空格，得到规范科目名。
-
-    与 ``scripts/rebuild_moutai_gt.py`` 的 GT 名称规范化保持同一套规则，
-    保证 F1 匹配口径一致（GT 侧已规范，预测侧在落库前规范化）。
-    """
-    name = raw.strip()
-    # 括号注释碎片截断（“损失以“－”号填列” 跨行拆分时只剩半截括号）
-    mark = name.find("号填")
-    if mark != -1:
-        paren = name.rfind("（", 0, mark)
-        name = name[:paren] if paren != -1 else name[:mark]
-    name = _NAME_PREFIX_RE.sub("", name)
-    name = _NAME_PAREN_RE.sub("", name)
-    name = name.replace("（", "").replace("）", "")
-    name = name.replace("－", "-").replace("—", "-").replace("“", "").replace("”", "")
-    return re.sub(r"\s+", "", name).strip()
+# 科目名规范化已抽至 normalize.py（单一事实来源，M4.10 审查修复 L2）：
+# 此前 handler / eval_m2_f1 / rebuild_moutai_gt 三份拷贝已分叉（GT 侧剥
+# 尾随附注号而预测侧不剥），此处 re-export 保持 ``from ...handler import
+# normalize_item_name`` 的既有测试导入路径兼容。
 
 _extractor: Extractor | None = None
 _validator: Validator | None = None
@@ -199,7 +195,7 @@ def _page_text(document: Document, page: Page) -> str:
     return "\n".join(parts)
 
 
-def _html_from_text_blocks(page: Page) -> str | None:
+def _html_from_text_blocks(page: Page, min_y0: float = 0.0) -> str | None:
     """无表格页的文本降级：从行文本重建简单 HTML 表格。
 
     M4.10 F1 复测：64 页（合并现金流量表头部）被 PP-DocLayout 漏检，
@@ -207,14 +203,26 @@ def _html_from_text_blocks(page: Page) -> str | None:
     183,990,403,487.80 …”整行）。仅对命中关键词的页触发，供 LLM
     抽取兜底；不含金额的行（无值科目）直接跳过。
 
+    M4.10 审查修复 M1：
+
+    - ``min_y0``：起始页传合并标题 y0，排除标题上方的上一报表尾块
+      （如 CF 头部页上方的利润表尾「六、综合收益总额…」）；
+    - 金额取严格千分位分组的首个匹配（附注号粘值防御）；
+    - 科目名剥尾随附注号（与 normalize_item_name 对齐）；
+    - 清理后名称超 ``_FALLBACK_NAME_MAX_LEN`` 的行视为多名称块熔合，
+      跳过（无列几何不可拆分，错误配对危害大于缺行）。
+
     Args:
         page: 无 table_block 的候选页。
+        min_y0: 参与重建的文本块最小 y0（起始页为合并标题位置）。
 
     Returns:
         重建的 ``<table>`` HTML；无可重建行时返回 ``None``。
     """
     rows: list[str] = []
     for block in page.text_blocks:
+        if block.bbox.y0 < min_y0:
+            continue
         text = block.text.strip()
         if not text:
             continue
@@ -225,8 +233,8 @@ def _html_from_text_blocks(page: Page) -> str | None:
         match = _NUM_VALUE_RE.search(text)
         if not match:
             continue
-        name = text[: match.start()].strip()
-        if not name:
+        name = re.sub(r"\d{1,3}$", "", text[: match.start()].strip())
+        if not name or len(name) > _FALLBACK_NAME_MAX_LEN:
             continue
         value = match.group(1).replace(",", "")
         rows.append(f"<tr><td>{name}</td><td>{value}</td></tr>")
@@ -264,6 +272,13 @@ def select_table(
       表格全部并入，按页序拼接 HTML；标题页只取标题上/下方的表
       （59 页既有合并权益尾又有母公司表头，靠 bbox.y0 与标题位置
       切分）；
+    - **隐式边界（H1 修复）**：母公司标题缺失（换行拆块/措辞变体/
+      段缺失）时，段内出现的任一其它报表标题（如下一张报表的合并
+      标题）作为隐式终止，防止起始页之后到文档末尾的全部表格
+      （母公司表、附注表）以「合并」口径并入段内；
+    - **密度收窄兜底（H1 修复）**：六类标题均缺失时，按关键词密度
+      收窄段尾（最后一个关键词命中页，硬上限起始页后 7 页），
+      并输出 warning 保证根因可见；
     - **文本降级**：段内命中关键词但无表格的页（PP-DocLayout 漏检，
       如 64 页合并现金流量表头部），用行文本重建 HTML 兜底；
     - scope 恒为「合并」（段由合并标题锚定；A 股年报合并报表为
@@ -278,7 +293,6 @@ def select_table(
     """
     keywords = _TABLE_KEYWORDS[statement_type.value]
     merged_title = _MERGED_TITLES[statement_type.value]
-    parent_title = _PARENT_TITLES[statement_type.value]
 
     # 段开始页：合并标题所在页。
     start_page: Page | None = None
@@ -294,32 +308,71 @@ def select_table(
         return None
     start_idx = start_page.page_index
 
-    # 段结束页：母公司标题所在页（可缺——报表可能在文档尾部被切）。
+    # 段结束页：段内首个「其它报表标题」所在页（H1 隐式边界）。正常
+    # 文档序中首个命中的即当前报表的母公司标题；母公司标题缺失
+    # （换行拆块/措辞变体/段缺失）时为下一张报表的标题，防止把
+    # 起始页之后到文档末尾的全部表格并入合并段。
     end_page: Page | None = None
     end_title_y0 = float("inf")
     for page in document.pages:
         if page.page_index < start_idx:
             continue
-        y0 = _title_y0(page, parent_title)
-        if y0 is not None:
-            end_page = page
-            end_title_y0 = y0
+        for end_title in _ALL_TITLES:
+            if end_title == merged_title:
+                continue
+            y0 = _title_y0(page, end_title)
+            if y0 is not None:
+                end_page = page
+                end_title_y0 = y0
+                break
+        if end_page is not None:
             break
+
+    # H1 密度收窄兜底：六类标题均缺失时，按关键词密度收窄段尾——
+    # 顺序扫描，间隔超过 1 页无命中即认为段已结束（后续命中属附注等
+    # 其它段落，不得扩展段尾）；段尾容忍 1 页无命中的续页，并受
+    # 起始页后 _MAX_SEGMENT_SPAN 硬上限约束，保证根因可见。
+    effective_end = start_idx + _MAX_SEGMENT_SPAN
+    if end_page is None:
+        last_hit = start_idx
+        for page in document.pages:
+            if page.page_index < start_idx:
+                continue
+            if page.page_index > last_hit + 1:
+                break
+            if any(kw in _page_text(document, page) for kw in keywords):
+                last_hit = page.page_index
+        effective_end = min(last_hit + 1, start_idx + _MAX_SEGMENT_SPAN)
+        LOGGER.warning(
+            "[select_table] %s 未找到任何段终止标题（母公司及其它报表标题均缺），"
+            "按关键词密度收窄段尾 start=%d end=%d（旧版会并入全文档尾）",
+            merged_title,
+            start_idx,
+            effective_end,
+        )
 
     merged_rows: list[tuple[int, float, str]] = []
     for page in document.pages:
-        if page.page_index < start_idx:
+        idx = page.page_index
+        if idx < start_idx:
             continue
-        if page.page_index == start_idx:
+        if end_page is not None and idx > end_page.page_index:
+            continue
+        if end_page is None and idx > effective_end:
+            continue
+        is_start = idx == start_idx
+        is_end = end_page is not None and idx == end_page.page_index
+        if is_end:
+            # 结束页：终止标题上方的表属于合并段尾部（如 59 页合并权益尾）；
+            # 同页含合并标题时同时要求位于合并标题下方（M3 修复：旧 start
+            # 分支遮蔽此 y 切分，母公司表曾以合并口径并入段内）。
+            lo = start_title_y0 if is_start else float("-inf")
+            tables = [t for t in page.table_blocks if lo <= t.bbox.y0 < end_title_y0]
+            allow_text_fallback = False
+        elif is_start:
             # 起始页：合并标题下方的表（标题通常位于页底，此页往往无表）。
             tables = [t for t in page.table_blocks if t.bbox.y0 >= start_title_y0]
             allow_text_fallback = not tables
-        elif end_page is not None and page.page_index == end_page.page_index:
-            # 结束页：母公司标题上方的表属于合并段尾部（如 59 页合并权益尾）。
-            tables = [t for t in page.table_blocks if t.bbox.y0 < end_title_y0]
-            allow_text_fallback = False
-        elif end_page is not None and page.page_index > end_page.page_index:
-            continue
         else:
             tables = list(page.table_blocks)
             allow_text_fallback = not tables
@@ -332,7 +385,10 @@ def select_table(
         elif allow_text_fallback and any(
             kw in _page_text(document, page) for kw in keywords
         ):
-            rebuilt = _html_from_text_blocks(page)
+            # 起始页传标题 y0：排除标题上方上一报表的尾块（M1）。
+            rebuilt = _html_from_text_blocks(
+                page, min_y0=start_title_y0 if is_start else 0.0
+            )
             if rebuilt:
                 merged_rows.append((page.page_index, 0.0, rebuilt))
     merged_rows.sort(key=lambda item: (item[0], item[1]))
