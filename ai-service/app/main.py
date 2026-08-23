@@ -12,6 +12,7 @@ from app.api.models import router as models_router
 from app.api.parse import router as parse_router
 from app.core.config import Settings
 from app.core.exceptions import AiException
+from app.mq.chat_consumer import ChatConsumer
 from app.mq.consumer import TaskConsumer
 from app.mq.producer import ProgressProducer
 
@@ -29,15 +30,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        """Start and stop the M1 RabbitMQ worker with the web application."""
+        """Start and stop the M1 RabbitMQ workers with the web application."""
         producer = ProgressProducer(runtime_settings)
         consumer = TaskConsumer(runtime_settings, producer)
+        chat_consumer = ChatConsumer(runtime_settings)
         app.state.task_consumer = consumer
         consumer.start()
+        chat_consumer.start()
         try:
             yield
         finally:
             consumer.stop()
+            chat_consumer.stop()
 
     application = FastAPI(
         title="FinReport AI Service",
