@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     mysql_user: str = "finreport"
     mysql_password: str = "finreport"
     mysql_database: str = "finreport"
+    # M5.02/M5.07 Milvus（compose 注入 MILVUS_HOST；search_kb/build_kb 使用）。
+    milvus_host: str = "localhost"
+    milvus_port: int = 19530
     # M4.07 本地 embedding 模型路径（bge-small-zh-v1.5，CPU）。
     model_embed_path: str = "models/bge-small-zh-v1.5"
     # Inference SLA (spec §3.7 / §12.1) — M4.08 后作用于 DeepSeek API 路由。

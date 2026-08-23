@@ -54,8 +54,9 @@ def build_react_prompt(
     history: list[dict[str, str]],
     *,
     company_context: str = "",
+    conversation: list[dict[str, str]] | None = None,
 ) -> str:
-    """渲染 user 消息：问题 + 逐步历史（thought/action/observation）。
+    """渲染 user 消息：问题 + 对话历史 + 逐步历史（thought/action/observation）。
 
     Args:
         question: 用户问题。
@@ -63,6 +64,8 @@ def build_react_prompt(
             三键（action 为工具调用描述文本）。
         company_context: 公司上下文提示（如「贵州茅台（600519），报告期
             2025-12-31」）；为空则不渲染。
+        conversation: 此前问答轮次（每项含 ``role``（user/assistant）与
+            ``content``），多轮追问时提供前文背景；为空则不渲染。
 
     Returns:
         User prompt 文本。
@@ -70,6 +73,11 @@ def build_react_prompt(
     parts: list[str] = []
     if company_context:
         parts.append(f"当前报表上下文：{company_context}")
+    if conversation:
+        parts.append("对话历史（此前轮次，供回答当前问题时参考）：")
+        for turn in conversation:
+            role = "用户" if turn.get("role") == "user" else "助手"
+            parts.append(f"{role}: {turn.get('content', '')}")
     parts.append(f"用户问题：{question}")
     if history:
         parts.append("\n已执行的步骤（严格遵守其中的观察结果）：")
