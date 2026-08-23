@@ -55,6 +55,7 @@ def build_react_prompt(
     *,
     company_context: str = "",
     conversation: list[dict[str, str]] | None = None,
+    summary: str = "",
 ) -> str:
     """渲染 user 消息：问题 + 对话历史 + 逐步历史（thought/action/observation）。
 
@@ -66,6 +67,7 @@ def build_react_prompt(
             2025-12-31」）；为空则不渲染。
         conversation: 此前问答轮次（每项含 ``role``（user/assistant）与
             ``content``），多轮追问时提供前文背景；为空则不渲染。
+        summary: 超长会话压缩摘要（M5.06，保留窗口外关键事实）；为空则不渲染。
 
     Returns:
         User prompt 文本。
@@ -73,6 +75,8 @@ def build_react_prompt(
     parts: list[str] = []
     if company_context:
         parts.append(f"当前报表上下文：{company_context}")
+    if summary:
+        parts.append(f"此前对话摘要（关键事实已保留，回答时须遵循）：{summary}")
     if conversation:
         parts.append("对话历史（此前轮次，供回答当前问题时参考）：")
         for turn in conversation:

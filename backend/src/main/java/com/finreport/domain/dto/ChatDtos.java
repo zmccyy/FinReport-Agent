@@ -73,14 +73,16 @@ public final class ChatDtos {
      * @param question       用户问题
      * @param companyContext 公司上下文（如「贵州茅台（600519），报告期 2025-12-31」）
      * @param history        此前对话轮次（最近 10 轮）
+     * @param summary        窗口外轮次的压缩摘要（可能为空）
      */
-    @JsonPropertyOrder({"sessionId", "messageId", "reportId", "question", "companyContext", "history"})
+    @JsonPropertyOrder({"sessionId", "messageId", "reportId", "question", "companyContext", "history", "summary"})
     public record ChatStreamRequest(
             String sessionId,
             String messageId,
             Long reportId,
             String question,
             String companyContext,
-            List<ChatTurn> history) {
+            List<ChatTurn> history,
+            String summary) {
     }
 }

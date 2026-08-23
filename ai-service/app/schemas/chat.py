@@ -23,6 +23,7 @@ class ChatStreamRequest(BaseModel):
         default=None, alias="companyContext", max_length=200
     )
     history: list[ChatTurn] = Field(default_factory=list, max_length=30)
+    summary: str | None = Field(default=None, max_length=1000)
 
     model_config = {"populate_by_name": True}
 

@@ -266,6 +266,24 @@ def test_orchestrator_on_event_emits_step_events() -> None:
     assert received[2]["result"] == {"ok": True, "data": {"item": "货币资金"}}
 
 
+def test_orchestrator_summary_passed_to_prompt() -> None:
+    """压缩摘要注入 user prompt（M5.06 窗口外关键事实）。"""
+    prompts: list[str] = []
+
+    class RecordingHub:
+        def generate(self, prompt: str, **kwargs: Any) -> SimpleNamespace:
+            prompts.append(prompt)
+            return SimpleNamespace(text=_final_output("答案"))
+
+    orchestrator = AgentOrchestrator(RecordingHub(), _make_registry())
+    orchestrator.run("当前问题", summary="此前讨论了茅台营收 1688 亿")
+
+    assert prompts
+    assert "此前对话摘要" in prompts[0]
+    assert "茅台营收 1688 亿" in prompts[0]
+    assert "当前问题" in prompts[0]
+
+
 def test_orchestrator_conversation_passed_to_prompt() -> None:
     """conversation 历史注入 user prompt（多轮追问背景）。"""
     prompts: list[str] = []

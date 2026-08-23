@@ -186,27 +186,28 @@ public class ChatService {
     }
 
     /**
-     * 装配 L3 请求并拉流：公司上下文 + 最近 10 轮历史 + MQ 控制流 + SSE 透传。
+     * 装配 L3 请求并拉流：公司上下文 + 最近 10 轮历史 + 摘要 + MQ 控制流 + SSE 透传。
      */
     private Flux<ServerSentEvent<String>> streamExchange(
             ChatSession session, String content, String messageId) {
         TokenAccumulator accumulator = new TokenAccumulator(objectMapper);
         return reportRepository.findById(session.getReportId())
-                .flatMapMany(report -> contextService.loadHistory(session.getId())
-                        .flatMapMany(history -> {
+                .flatMapMany(report -> contextService.loadContext(session.getId())
+                        .flatMapMany(context -> {
                             ChatStreamRequest l3Request = new ChatStreamRequest(
                                     String.valueOf(session.getId()),
                                     messageId,
                                     session.getReportId(),
                                     content,
                                     companyContext(report),
-                                    history);
+                                    context.turns(),
+                                    context.summary());
                             // 控制流（尽力而为，失败不影响数据面）。
                             messageProducer.publishChat(l3Request, traceId());
                             log.info("[ChatService] 问答开始 sessionId={} messageId={} questionLength={}",
                                     session.getId(), messageId, content.length());
                             return streamProxy.stream(l3Request, traceId())
-                                    .concatMap(event -> handleEvent(event, session, accumulator));
+                                    .concatMap(event -> handleEvent(event, session, content, accumulator));
                         }))
                 .onErrorResume(error -> {
                     log.warn("[ChatService] 问答链路异常 sessionId={} messageId={} error={}",
@@ -216,17 +217,18 @@ public class ChatService {
     }
 
     /**
-     * 处理一条透传事件：token 累计、done 落库、其余原样转发。
+     * 处理一条透传事件：token 累计、done 落库 + 会话上下文追加、其余原样转发。
      */
     private Mono<ServerSentEvent<String>> handleEvent(
-            ServerSentEvent<String> event, ChatSession session, TokenAccumulator accumulator) {
+            ServerSentEvent<String> event, ChatSession session, String userContent,
+            TokenAccumulator accumulator) {
         String eventName = event.event() == null ? "message" : event.event();
         switch (eventName) {
             case "token":
                 accumulator.append(event.data());
                 return Mono.just(event); // 原样透传前端
             case "done":
-                return onDone(event, session, accumulator);
+                return onDone(event, session, userContent, accumulator);
             case "error":
                 log.warn("[ChatService] L3 问答错误 sessionId={} data={}",
                         session.getId(), event.data());
@@ -237,21 +239,32 @@ public class ChatService {
     }
 
     /**
-     * done 事件：解析元数据（toolsUsed/tokenCount），把累计的答案文本
-     * 落库为 assistant 消息后转发 done 给前端。
+     * done 事件：把累计的答案文本落库为 assistant 消息、异步追加会话上下文
+     * （超过 10 轮触发摘要压缩，M5.06），然后转发 done 给前端。
      */
     private Mono<ServerSentEvent<String>> onDone(
-            ServerSentEvent<String> event, ChatSession session, TokenAccumulator accumulator) {
+            ServerSentEvent<String> event, ChatSession session, String userContent,
+            TokenAccumulator accumulator) {
         return Mono.fromCallable(() -> parseDone(event.data()))
-                .flatMap(done -> messageRepository.save(ChatMessage.builder()
-                        .sessionId(session.getId())
-                        .role("assistant")
-                        .content(accumulator.text())
-                        .toolsUsed(serialize(done.toolsUsed()))
-                        .tokenCount(done.tokenCount())
-                        .createdAt(LocalDateTime.now())
-                        .build())
-                        .thenReturn(event));
+                .flatMap(done -> {
+                    ChatMessage assistant = ChatMessage.builder()
+                            .sessionId(session.getId())
+                            .role("assistant")
+                            .content(accumulator.text())
+                            .toolsUsed(serialize(done.toolsUsed()))
+                            .tokenCount(done.tokenCount())
+                            .createdAt(LocalDateTime.now())
+                            .build();
+                    return messageRepository.save(assistant)
+                            // 上下文追加是后台尽力而为（压缩失败内部降级），不阻塞 SSE done。
+                            .flatMap(saved -> {
+                                contextService.appendRound(session.getId(), userContent, saved.getContent())
+                                        .subscribe(null, error -> log.warn(
+                                                "[ChatService] 会话上下文追加失败 sessionId={} error={}",
+                                                session.getId(), error.getMessage()));
+                                return Mono.just(event);
+                            });
+                });
     }
 
     // ========================================================================

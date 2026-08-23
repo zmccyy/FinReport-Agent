@@ -2,6 +2,7 @@ package com.finreport.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -134,7 +135,9 @@ class ChatServiceTest {
         when(sessionRepository.findByIdAndUserId(1L, 7L)).thenReturn(Mono.just(chat));
         when(messageRepository.save(any(ChatMessage.class))).thenAnswer(i -> Mono.just(i.getArgument(0)));
         when(reportRepository.findById(17L)).thenReturn(Mono.just(report(17L, 7L)));
-        when(contextService.loadHistory(1L)).thenReturn(Mono.just(List.of()));
+        when(contextService.loadContext(1L)).thenReturn(Mono.just(new SessionContextService.SessionContext("", List.of())));
+        when(contextService.appendRound(anyLong(), any(String.class), any(String.class)))
+                .thenReturn(Mono.empty());
         when(streamProxy.stream(any(ChatStreamRequest.class), eq(null)))
                 .thenReturn(Flux.just(
                         sse("token", "{\"content\":\"营收\"}"),
@@ -160,7 +163,7 @@ class ChatServiceTest {
         when(sessionRepository.findByIdAndUserId(1L, 7L)).thenReturn(Mono.just(chat));
         when(messageRepository.save(any(ChatMessage.class))).thenAnswer(i -> Mono.just(i.getArgument(0)));
         when(reportRepository.findById(17L)).thenReturn(Mono.just(report(17L, 7L)));
-        when(contextService.loadHistory(1L)).thenReturn(Mono.just(List.of()));
+        when(contextService.loadContext(1L)).thenReturn(Mono.just(new SessionContextService.SessionContext("", List.of())));
         when(streamProxy.stream(any(ChatStreamRequest.class), eq(null)))
                 .thenReturn(Flux.just(sse("error", "{\"code\":\"CHAT_FAILED\",\"message\":\"boom\"}")));
 
@@ -193,8 +196,10 @@ class ChatServiceTest {
         when(sessionRepository.findByIdAndUserId(1L, 7L)).thenReturn(Mono.just(chat));
         when(messageRepository.save(any(ChatMessage.class))).thenAnswer(i -> Mono.just(i.getArgument(0)));
         when(reportRepository.findById(17L)).thenReturn(Mono.just(report(17L, 7L)));
-        when(contextService.loadHistory(1L)).thenReturn(Mono.just(List.of(
-                new com.finreport.domain.dto.ChatDtos.ChatTurn("user", "之前的问题"))));
+        when(contextService.loadContext(1L)).thenReturn(Mono.just(new SessionContextService.SessionContext(
+                "旧摘要", List.of(new com.finreport.domain.dto.ChatDtos.ChatTurn("user", "之前的问题")))));
+        when(contextService.appendRound(anyLong(), any(String.class), any(String.class)))
+                .thenReturn(Mono.empty());
         when(streamProxy.stream(any(ChatStreamRequest.class), eq(null)))
                 .thenReturn(Flux.just(sse("done", "{\"messageId\":\"m\",\"tokenCount\":0,\"toolsUsed\":[],\"finishedReason\":\"final_answer\",\"error\":\"\"}")));
 
@@ -202,8 +207,13 @@ class ChatServiceTest {
                 .expectNextCount(1)
                 .verifyComplete();
 
-        verify(streamProxy).stream(any(ChatStreamRequest.class), eq(null));
+        verify(streamProxy).stream(org.mockito.ArgumentMatchers.argThat(request ->
+                "旧摘要".equals(request.summary())
+                        && request.history().size() == 1
+                        && "贵州茅台（600519），报告期 2025-12-31".equals(request.companyContext())), eq(null));
         verify(messageProducer).publishChat(any(ChatStreamRequest.class), eq(null));
+        // done 后异步追加会话上下文（fire-and-forget；本用例无 token 事件，答案为空）
+        verify(contextService).appendRound(1L, "追问", "");
     }
 
     private static ServerSentEvent<String> sse(String event, String data) {

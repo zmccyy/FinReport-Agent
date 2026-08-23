@@ -57,13 +57,16 @@ public class ChatStreamProxy {
      * @return L3 SSE 事件流（含 done / error 终态）
      */
     public Flux<ServerSentEvent<String>> stream(ChatStreamRequest request, String traceId) {
-        Map<String, Object> body = Map.of(
-                "sessionId", request.sessionId(),
-                "messageId", request.messageId(),
-                "reportId", request.reportId(),
-                "question", request.question(),
-                "companyContext", request.companyContext() == null ? "" : request.companyContext(),
-                "history", request.history());
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("sessionId", request.sessionId());
+        body.put("messageId", request.messageId());
+        body.put("reportId", request.reportId());
+        body.put("question", request.question());
+        body.put("companyContext", request.companyContext() == null ? "" : request.companyContext());
+        body.put("history", request.history());
+        if (request.summary() != null && !request.summary().isBlank()) {
+            body.put("summary", request.summary());
+        }
         return webClient.post()
                 .uri("/internal/chat/stream")
                 .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)

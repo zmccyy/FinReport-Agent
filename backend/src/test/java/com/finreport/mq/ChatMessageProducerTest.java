@@ -31,7 +31,7 @@ class ChatMessageProducerTest {
     void shouldPublishToChatExchangeWithIdempotencyHeaders() throws Exception {
         ChatMessageProducer producer = new ChatMessageProducer(rabbitTemplate);
         ChatStreamRequest request = new ChatStreamRequest(
-                "1", "m-uuid", 17L, "营收？", "贵州茅台（600519）", List.of());
+                "1", "m-uuid", 17L, "营收？", "贵州茅台（600519）", List.of(), null);
 
         producer.publishChat(request, "trace-1");
 
@@ -63,6 +63,6 @@ class ChatMessageProducerTest {
 
         // 控制面失败不抛出（spec §3.3 解耦：数据面不受影响）
         producer.publishChat(
-                new ChatStreamRequest("1", "m-1", 17L, "问题", "", List.of()), "trace-1");
+                new ChatStreamRequest("1", "m-1", 17L, "问题", "", List.of(), null), "trace-1");
     }
 }

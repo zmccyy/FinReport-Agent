@@ -110,6 +110,7 @@ async def stream_chat(
                 request.question,
                 company_context=request.company_context or "",
                 conversation=conversation,
+                summary=request.summary or "",
                 on_event=emit,
             )
         finally:

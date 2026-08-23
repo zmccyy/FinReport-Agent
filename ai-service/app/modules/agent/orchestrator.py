@@ -111,6 +111,7 @@ class AgentOrchestrator:
         *,
         company_context: str = "",
         conversation: list[dict[str, str]] | None = None,
+        summary: str = "",
         on_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> AgentResult:
         """执行一轮 ReAct 对话。
@@ -121,6 +122,7 @@ class AgentOrchestrator:
                 2025-12-31」）；帮助模型正确选用工具。
             conversation: 此前对话轮次（每项含 ``role`` / ``content``），
                 供多轮追问时携带上下文；None 表示首轮。
+            summary: 超长会话压缩摘要（M5.06）；为空表示无摘要。
             on_event: 可选事件回调（M5.04 SSE 流式输出用）。每完成一步
                 依次收到 ``thought`` / ``tool_call`` / ``tool_result``
                 事件（dict 含 ``type`` 等字段），在 ReAct 循环内同步调用。
@@ -151,6 +153,7 @@ class AgentOrchestrator:
                     history,
                     company_context=company_context,
                     conversation=conversation,
+                    summary=summary,
                 )
                 + prompt_extra
             )
