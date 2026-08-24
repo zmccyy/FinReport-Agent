@@ -121,7 +121,7 @@ RUN if [ -n "$APT_MIRROR" ]; then \
 COPY pyproject.toml .
 COPY app/ ./app/
 RUN if [ -n "$PIP_INDEX_URL" ]; then export PIP_INDEX_URL; fi \
-    && pip install --no-cache-dir -e ".[dev]" minio pymilvus
+    && pip install --no-cache-dir -e ".[dev]" minio pymilvus python-multipart pymysql
 
 EXPOSE 8000
 

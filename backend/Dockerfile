@@ -68,4 +68,7 @@ COPY src ./src
 
 EXPOSE 8080 5005
 
-CMD ["./mvnw", "spring-boot:run"]
+# 跳过 JaCoCo 离线插桩并 clean：spring-boot:run 的 classpath 不含
+# test-scope 的 jacoco runtime，插桩后启动必炸（与本地开发同因）；
+# jacoco.skip 只阻止重新插桩，不清除已插桩 classes，必须 clean 兜底。
+CMD ["./mvnw", "clean", "spring-boot:run", "-Djacoco.skip=true"]

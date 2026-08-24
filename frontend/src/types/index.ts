@@ -174,3 +174,88 @@ export interface ReportArtifacts {
   markdown: ReportArtifact | null
   charts: ReportArtifact[]
 }
+
+// ============================================================================
+// M5.08 问答（Chat）类型 — spec §6.3.3
+// ============================================================================
+
+/** POST /api/v1/chat/sessions 响应 — chat_session 表 */
+export interface ChatSession {
+  id: number
+  reportId: number
+  title: string
+}
+
+/** GET /api/v1/chat/sessions/{id}/messages 单条 — chat_message 表 */
+export interface ChatMessage {
+  id: number
+  role: 'user' | 'assistant'
+  content: string
+  toolsUsed: string[]
+  createdAt: string
+}
+
+/** SSE thought 事件 data — ReAct 思考步骤 */
+export interface ChatThoughtEvent {
+  step: number
+  content: string
+}
+
+/** SSE tool_call 事件 data — 工具调用 */
+export interface ChatToolCallEvent {
+  step: number
+  tool: string
+  args: Record<string, unknown>
+}
+
+/** SSE tool_result 事件 data — 工具执行结果 */
+export interface ChatToolResultEvent {
+  step: number
+  tool: string
+  result: {
+    ok: boolean
+    data?: Record<string, unknown> | null
+    reason?: string
+    error?: string
+  }
+}
+
+/** SSE token 事件 data — 答案片段 */
+export interface ChatTokenEvent {
+  content: string
+}
+
+/** SSE done 事件 data — 轮结束（含消息关联与工具清单） */
+export interface ChatDoneEvent {
+  messageId: string
+  tokenCount: number
+  toolsUsed: string[]
+  finishedReason?: string
+  error?: string
+}
+
+/** SSE error 事件 data */
+export interface ChatErrorEvent {
+  code: string
+  message: string
+  finishedReason?: string
+}
+
+/** 聊天 SSE 事件联合类型（ChatStreamClient 透传） */
+export type ChatStreamEvent =
+  | { type: 'thought'; data: ChatThoughtEvent }
+  | { type: 'tool_call'; data: ChatToolCallEvent }
+  | { type: 'tool_result'; data: ChatToolResultEvent }
+  | { type: 'token'; data: ChatTokenEvent }
+  | { type: 'done'; data: ChatDoneEvent }
+  | { type: 'error'; data: ChatErrorEvent }
+
+/** 前端本地渲染的一条 ReAct 步骤（会话内跨消息累计） */
+export interface ReactStep {
+  step: number
+  thought: string
+  tool?: string
+  args?: Record<string, unknown>
+  toolResult?: ChatToolResultEvent['result']
+  toolOk?: boolean
+}

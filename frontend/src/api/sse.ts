@@ -47,7 +47,7 @@ const DEFAULT_MAX_RETRIES = 5
 const DEFAULT_RETRY_BASE_MS = 1000
 
 /** SSE 协议解析器：跨 chunk 维护半行与半事件状态。 */
-class SseParser {
+export class SseParser {
   private buffer = ''
   private eventType = 'message'
   private dataLines: string[] = []

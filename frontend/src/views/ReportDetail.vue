@@ -7,6 +7,7 @@ import StatementTable from '@/components/StatementTable.vue'
 import CheckList from '@/components/CheckList.vue'
 import AnomalyList from '@/components/AnomalyList.vue'
 import ReportViewer from '@/components/ReportViewer.vue'
+import Chat from '@/views/Chat.vue'
 import { useStatementsStore } from '@/stores/statements'
 import { useReportsStore } from '@/stores/reports'
 import type { ReportDetail } from '@/types'
@@ -80,6 +81,7 @@ const tabPanes = computed(() => [
   { name: 'checks', label: '勾稽核对' },
   { name: 'anomalies', label: '异常检测' },
   { name: 'report', label: '报告' },
+  { name: 'chat', label: '问答' },
 ])
 
 // KPI 占位数据，未来接入 L3 摘要接口
@@ -238,6 +240,7 @@ function onTabChange(name: string): void {
               <CheckList v-else-if="tab.name === 'checks'" :report-id="Number(reportId)" />
               <AnomalyList v-else-if="tab.name === 'anomalies'" :report-id="Number(reportId)" />
               <ReportViewer v-else-if="tab.name === 'report'" :report-id="Number(reportId)" />
+              <Chat v-else-if="tab.name === 'chat'" :report-id="Number(reportId)" :company-name="detail?.companyName" :company-code="detail?.companyCode" :report-period="detail?.reportPeriod" />
             </div>
           </el-tab-pane>
         </el-tabs>

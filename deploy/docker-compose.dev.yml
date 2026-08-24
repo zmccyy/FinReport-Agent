@@ -89,7 +89,8 @@ services:
       - "8080:8080"
       - "5005:5005"                       # Java 远程调试端口
     command: >
-      ./mvnw spring-boot:run
+      ./mvnw clean spring-boot:run
+      -Djacoco.skip=true
       -Dspring-boot.run.jvmArguments="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
     healthcheck:
       start_period: 30s
