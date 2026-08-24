@@ -28,40 +28,40 @@ class Embedder(Protocol):
 
 
 class _MilvusSearcher:
-    """惰性连接 Milvus 的检索器（进程内复用连接）。"""
+    """惰性连接 Milvus 的检索器（进程内复用连接，MilvusClient 2.4+）。"""
 
     def __init__(self, host: str, port: int) -> None:
         self.host = host
         self.port = port
-        self._collection: Any = None
+        self._client: Any = None
 
     def search(self, vector: list[float], top_k: int) -> list[dict[str, Any]]:
         """向量检索 top_k 条；连接/检索失败抛异常（由调用方转业务结果）。"""
-        if self._collection is None:
-            from pymilvus import Collection, connections
+        if self._client is None:
+            from pymilvus import MilvusClient
 
-            connections.connect(
-                alias="default", host=self.host, port=self.port, timeout=10
+            self._client = MilvusClient(
+                uri=f"http://{self.host}:{self.port}", timeout=10
             )
-            self._collection = Collection(COLLECTION_NAME)
-            self._collection.load()
-        results = self._collection.search(
+            # drop+重建后的 collection 未驻留内存，检索前必须 load（幂等）。
+            self._client.load_collection(COLLECTION_NAME)
+        results = self._client.search(
+            collection_name=COLLECTION_NAME,
             data=[vector],
-            anns_field="embedding",
-            param=SEARCH_PARAMS,
             limit=top_k,
+            search_params={"metric_type": "IP", "params": SEARCH_PARAMS},
             output_fields=["text", "page", "doc_id", "chunk_type"],
         )
         hits: list[dict[str, Any]] = []
-        for hit in results[0]:
-            entity = hit.entity
+        for hit in (results or [[]])[0]:
+            entity = hit.get("entity", {})
             hits.append(
                 {
                     "text": entity.get("text", ""),
                     "page": entity.get("page"),
                     "doc_id": entity.get("doc_id"),
                     "chunk_type": entity.get("chunk_type", ""),
-                    "score": round(float(hit.score), 4),
+                    "score": round(float(hit.get("distance", 0.0)), 4),
                 }
             )
         return hits

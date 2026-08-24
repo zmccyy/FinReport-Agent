@@ -65,7 +65,9 @@ def get_orchestrator_factory() -> Callable[[int], AgentOrchestrator]:
         registry = build_default_registry(
             reader,
             report_id,
-            embedder=hub.embed,
+            # search_kb 的 Embedder Protocol 要求带 .embed 方法的对象——
+            # 传 ModelHub 实例而非 bound method（M5.02 遗留，知识库就绪后暴露）。
+            embedder=hub,
             milvus_host=settings.milvus_host,
             milvus_port=settings.milvus_port,
         )

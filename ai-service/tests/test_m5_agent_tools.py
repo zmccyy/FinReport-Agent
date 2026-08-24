@@ -236,10 +236,10 @@ class FakeEmbedder:
 def test_search_kb_reports_not_ready_when_milvus_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     """Milvus 未就绪（M5.07 前）→ ok=True + data=null + reason，不抛异常。"""
 
-    def boom_connect(*args, **kwargs):
+    def boom_client(*args, **kwargs):
         raise ConnectionError("milvus not running")
 
-    monkeypatch.setattr("pymilvus.connections.connect", boom_connect)
+    monkeypatch.setattr("pymilvus.MilvusClient", boom_client)
     tool = make_search_kb(FakeEmbedder(), milvus_host="localhost", milvus_port=19530)
     result = tool.handler({"keywords": "产能扩张"})
     assert result["ok"] is True
@@ -248,34 +248,30 @@ def test_search_kb_reports_not_ready_when_milvus_unreachable(monkeypatch: pytest
 
 
 def test_search_kb_returns_hits(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Milvus 就绪 → 返回 hits（mock collection）。"""
+    """Milvus 就绪 → 返回 hits（mock MilvusClient）。"""
 
-    class FakeCollection:
-        def load(self) -> None:
+    class FakeMilvusClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def load_collection(self, *args, **kwargs) -> None:
             pass
 
         def search(self, *args, **kwargs):
-            assert kwargs["anns_field"] == "embedding"
+            assert kwargs["collection_name"] == "fin_kb"
             assert kwargs["limit"] == 3
-            hit = type("Hit", (), {})()
-            hit.score = 0.9123
-            hit.entity = {
-                "text": "茅台 2025 年实现营业收入…",
-                "page": 6,
-                "doc_id": 1,
-                "chunk_type": "TEXT",
-            }
-            return [[hit]]
+            return [[{
+                "id": 1,
+                "distance": 0.9123,
+                "entity": {
+                    "text": "茅台 2025 年实现营业收入…",
+                    "page": 6,
+                    "doc_id": 1,
+                    "chunk_type": "TEXT",
+                },
+            }]]
 
-    def fake_collection(name):
-        assert name == "fin_kb"
-        return FakeCollection()
-
-    def fake_connect(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr("pymilvus.connections.connect", fake_connect)
-    monkeypatch.setattr("pymilvus.Collection", fake_collection)
+    monkeypatch.setattr("pymilvus.MilvusClient", FakeMilvusClient)
     tool = make_search_kb(FakeEmbedder(), milvus_host="localhost", milvus_port=19530)
     result = tool.handler({"keywords": "营业收入"})
     assert result["ok"] is True
