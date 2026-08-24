@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { CaretRight, CircleCheckFilled, WarningFilled } from '@element-plus/icons-vue'
+import type { ReactStep } from '@/types'
 
 /**
  * ReAct 步骤折叠面板 — spec §6.5.2「折叠面板展示 thought/tool_call/tool_result，
@@ -11,7 +12,7 @@ import { CaretRight, CircleCheckFilled, WarningFilled } from '@element-plus/icon
  */
 
 interface Props {
-  steps: import('@/types').ReactStep[]
+  steps: ReactStep[]
   /** 是否为进行中的流（最后一步自动展开 + 呼吸动画） */
   streaming: boolean
 }
@@ -57,7 +58,7 @@ function toolLabel(tool: string): string {
 }
 
 /** 工具结果摘要：成功给主结论，业务性不可用时给 reason。 */
-function resultSummary(step: import('@/types').ReactStep): string {
+function resultSummary(step: ReactStep): string {
   const r = step.toolResult
   if (!r) return ''
   if (r.ok && r.data) {

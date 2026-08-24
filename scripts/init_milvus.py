@@ -27,62 +27,14 @@ if TYPE_CHECKING:
 # 配置：spec §5.3 fin_kb collection
 # ============================================================================
 
-COLLECTION_NAME = "fin_kb"
-COLLECTION_DESC = "财报知识库 — spec §5.3"
-
-# HNSW 索引参数：spec §5.3 — M=16, efConstruction=200, 查询 ef=64
-INDEX_PARAMS = {
-    "index_type": "HNSW",
-    "metric_type": "IP",  # 内积（bge 输出已归一化）
-    "params": {
-        "M": 16,
-        "efConstruction": 200,
-    },
-}
-
-# 查询参数
-SEARCH_PARAMS = {
-    "ef": 64,
-}
-
-# 字段规格（数据驱动，不依赖 pymilvus 类型；dry-run 模式零依赖）
-# dtype 字符串对应 pymilvus.DataType 枚举名，在 _build_fields() 中映射
-FIELD_SPECS = [
-    {
-        "name": "id",
-        "dtype": "INT64",
-        "is_primary": True,
-        "auto_id": True,
-        "description": "自增主键",
-    },
-    {"name": "doc_id", "dtype": "INT64", "description": "关联 report.id"},
-    {
-        "name": "chunk_id",
-        "dtype": "VARCHAR",
-        "max_length": 64,
-        "description": "唯一块标识",
-    },
-    {
-        "name": "embedding",
-        "dtype": "FLOAT_VECTOR",
-        "dim": 512,
-        "description": "bge-small 输出向量",
-    },
-    {"name": "page", "dtype": "INT16", "description": "页码"},
-    {"name": "position", "dtype": "INT16", "description": "页内位置"},
-    {
-        "name": "chunk_type",
-        "dtype": "VARCHAR",
-        "max_length": 16,
-        "description": "TEXT/TABLE_ROW/TABLE_HEADER",
-    },
-    {
-        "name": "text",
-        "dtype": "VARCHAR",
-        "max_length": 2048,
-        "description": "原文（用于召回展示）",
-    },
-]
+# schema 共享定义（spec §5.3）：与 build_kb.py 同目录同源，避免漂移。
+from _milvus_schema import (  # noqa: E402
+    COLLECTION_DESC,
+    COLLECTION_NAME,
+    FIELD_SPECS,
+    INDEX_PARAMS,
+    SEARCH_PARAMS,
+)
 
 
 def _import_pymilvus():

@@ -32,7 +32,10 @@ _AI_SERVICE = Path(
 if str(_AI_SERVICE) not in sys.path:
     sys.path.insert(0, str(_AI_SERVICE))
 
-from app.modules.agent.tools.search_kb import COLLECTION_NAME  # noqa: E402
+from _milvus_schema import (  # noqa: E402
+    COLLECTION_NAME,
+    FIELD_SPECS,
+)
 from app.modules.parser.chunker import Chunk, chunk_document  # noqa: E402
 from app.modules.parser.document_parser import DocumentParser  # noqa: E402
 from app.modules.parser.parser_factory import create_document_parser  # noqa: E402
@@ -92,9 +95,9 @@ def _insert_milvus(client: Any, rows: list[dict[str, Any]]) -> None:
 def _ensure_collection(client: Any, host: str, port: int) -> None:
     """drop 并重建 fin_kb（幂等全量重建）。
 
-    字段/索引与 scripts/init_milvus.py 的 FIELD_SPECS / INDEX_PARAMS 保持一致
-    （两处修改需同步）。重建而非 delete：Milvus delete 是软删（tombstone），
-    多次构建会累积可检索的旧数据。
+    字段/索引来自共享 _milvus_schema（与 scripts/init_milvus.py 同源）。
+    重建而非 delete：Milvus delete 是软删（tombstone），多次构建会累积
+    可检索的旧数据。
     """
     from pymilvus import CollectionSchema, DataType, FieldSchema
     from pymilvus.milvus_client.index import IndexParams
@@ -106,7 +109,7 @@ def _ensure_collection(client: Any, host: str, port: int) -> None:
         "INT16": DataType.INT16,
     }
     fields = []
-    for spec in _MILVUS_FIELD_SPECS:
+    for spec in FIELD_SPECS:
         kwargs: dict[str, Any] = {
             "name": spec["name"],
             "dtype": dtype_map[spec["dtype"]],
@@ -137,44 +140,6 @@ def _ensure_collection(client: Any, host: str, port: int) -> None:
     )
     client.create_index(collection_name=COLLECTION_NAME, index_params=index_params)
     print(f"[INFO] fin_kb 已重建（{host}:{port}）")
-
-
-#: 与 scripts/init_milvus.py FIELD_SPECS 一致的 fin_kb schema（同步维护）。
-_MILVUS_FIELD_SPECS = [
-    {
-        "name": "id",
-        "dtype": "INT64",
-        "is_primary": True,
-        "auto_id": True,
-        "description": "自增主键",
-    },
-    {
-        "name": "doc_id",
-        "dtype": "INT64",
-        "description": "关联 report.id 或文件名派生 id",
-    },
-    {
-        "name": "chunk_id",
-        "dtype": "VARCHAR",
-        "max_length": 64,
-        "description": "唯一块标识",
-    },
-    {
-        "name": "embedding",
-        "dtype": "FLOAT_VECTOR",
-        "dim": 512,
-        "description": "bge-small 输出向量",
-    },
-    {"name": "page", "dtype": "INT16", "description": "页码"},
-    {"name": "position", "dtype": "INT16", "description": "页内位置"},
-    {
-        "name": "chunk_type",
-        "dtype": "VARCHAR",
-        "max_length": 16,
-        "description": "TEXT/TABLE_ROW/TABLE_HEADER",
-    },
-    {"name": "text", "dtype": "VARCHAR", "max_length": 2048, "description": "原文"},
-]
 
 
 def _insert_mysql(mysql_conn: Any, rows: list[tuple[Any, ...]], doc_id: int) -> None:

@@ -48,7 +48,8 @@ const activeSessionId = ref<number | null>(null)
 const messages = ref<ViewMessage[]>([])
 const input = ref('')
 const phase = ref<StreamPhase>('idle')
-const emitting = computed(() => phase.value === 'streaming')
+// pending（会话装载/连接建立）期间同样禁止再次发送，防并发起流
+const emitting = computed(() => phase.value !== 'idle')
 const scrollTarget = ref<HTMLElement | null>(null)
 
 /** 建议问题（面板空态引导，规范话术库） */
@@ -62,7 +63,27 @@ const suggested = [
 let streamHandle: ReturnType<typeof connectChatStream> | null = null
 let localSeq = 0
 
-let currentSessionToDelete = ref<ChatSession | null>(null)
+/** ReAct 步骤本地缓存前缀（服务端 chat_message 不存步骤，会话重开时恢复）。 */
+const STEPS_CACHE_PREFIX = 'fin:chat:steps:'
+
+function cacheSteps(sessionId: number, messageId: string, steps: ReactStep[]): void {
+  try {
+    localStorage.setItem(`${STEPS_CACHE_PREFIX}${sessionId}:${messageId}`, JSON.stringify(steps))
+  } catch {
+    /* 隐私模式/容量不足时忽略，仅丢失折叠面板历史 */
+  }
+}
+
+function loadSteps(sessionId: number, messageId: string): ReactStep[] {
+  try {
+    const raw = localStorage.getItem(`${STEPS_CACHE_PREFIX}${sessionId}:${messageId}`)
+    return raw ? (JSON.parse(raw) as ReactStep[]) : []
+  } catch {
+    return []
+  }
+}
+
+const currentSessionToDelete = ref<ChatSession | null>(null)
 const sessionDeleteVisible = ref(false)
 
 // ---------------------------------------------------------------------------
@@ -100,7 +121,14 @@ async function openSession(sessionId: number): Promise<void> {
   messages.value = []
   try {
     const history = await listMessages(sessionId)
-    messages.value = history.map((m) => toView(m))
+    // 恢复本地缓存的 ReAct 步骤（thought/tool_call 折叠面板不随服务端持久化）
+    messages.value = history.map((m) => {
+      const view = toView(m)
+      if (view.role === 'assistant' && m.id) {
+        view.steps = loadSteps(sessionId, String(m.id))
+      }
+      return view
+    })
   } catch (err) {
     ElMessage.error('历史消息加载失败')
     console.error('[Chat] listMessages failed', err)
@@ -207,6 +235,9 @@ function handleStreamEvent(event: ChatStreamEvent, target: ViewMessage): void {
     case 'done':
       target.streaming = false
       target.id = event.data.messageId
+      if (activeSessionId.value != null) {
+        cacheSteps(activeSessionId.value, target.id, target.steps)
+      }
       phase.value = 'idle'
       void refreshAuthoritative()
       break

@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any
+
+from app.schemas.document import Document
 
 #: 默认目标块长度（字符）。
 CHUNK_SIZE = 512
@@ -92,7 +93,7 @@ def chunk_text(
 
 
 def chunk_document(
-    document: Any, chunk_size: int = CHUNK_SIZE, overlap: int = OVERLAP
+    document: Document, chunk_size: int = CHUNK_SIZE, overlap: int = OVERLAP
 ) -> list[Chunk]:
     """把解析后的 Document 转成检索块序列。
 
@@ -121,13 +122,16 @@ def chunk_document(
                     )
             elif block.type.value == "table":
                 # 跳过全空白行后再标记表头：首个非空行视为表头。
-                non_empty_rows = [row for row in block.rows if _row_to_text(row)]
-                for row_index, row in enumerate(non_empty_rows):
+                # walrus 使行文本只算一次（过滤与组装共用）。
+                non_empty_rows = [
+                    (row, text) for row in block.rows if (text := _row_to_text(row))
+                ]
+                for row_index, (_, row_text) in enumerate(non_empty_rows):
                     position += 1
                     chunk_type = TYPE_TABLE_HEADER if row_index == 0 else TYPE_TABLE_ROW
                     chunks.append(
                         Chunk(
-                            text=_row_to_text(row),
+                            text=row_text,
                             page=page.page_index + 1,
                             position=position,
                             chunk_type=chunk_type,
