@@ -113,48 +113,57 @@ class TestMinioBuckets:
 
 
 class TestMilvusCollection:
-    """验证 spec §5.3 fin_kb collection schema。"""
+    """验证 spec §5.3 fin_kb collection schema。
 
-    def test_fields_have_eight_entries(self):
-        """fin_kb collection 应有恰好 8 个字段。"""
-        # 加载模块读取 FIELD_SPECS 长度（dry-run 模式零依赖，可安全加载）
-        module_path = SCRIPTS_DIR / "init_milvus.py"
+    M5.07 起 schema 由 scripts/_milvus_schema.py 共享定义（init_milvus.py
+    与 build_kb.py 同源引用，避免漂移），本类改从该单一事实来源读取。
+    """
+
+    SCHEMA_PATH = SCRIPTS_DIR / "_milvus_schema.py"
+
+    def _load_schema_module(self):
+        """importlib 加载 _milvus_schema.py 模块（零外部依赖，可安全加载）。"""
         spec = importlib.util.spec_from_file_location(
-            "finreport_init_milvus_fields", module_path
+            "finreport_milvus_schema", self.SCHEMA_PATH
         )
         assert spec is not None and spec.loader is not None
         module = importlib.util.module_from_spec(spec)
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
+        return module
+
+    def test_fields_have_eight_entries(self):
+        """fin_kb collection 应有恰好 8 个字段。"""
+        module = self._load_schema_module()
         assert (
             len(module.FIELD_SPECS) == 8
         ), f"期望 8 个字段，实际 {len(module.FIELD_SPECS)}"
 
     def test_embedding_dim_is_512(self):
         """embedding 向量维度应为 512（bge-small 输出）。"""
-        source = (SCRIPTS_DIR / "init_milvus.py").read_text(encoding="utf-8")
+        source = self.SCHEMA_PATH.read_text(encoding="utf-8")
         assert '"dim": 512' in source, "embedding 维度应为 512"
 
     def test_hnsw_params_match_spec(self):
         """HNSW 索引参数应匹配 spec §5.3: M=16, efConstruction=200, IP。"""
-        source = (SCRIPTS_DIR / "init_milvus.py").read_text(encoding="utf-8")
+        source = self.SCHEMA_PATH.read_text(encoding="utf-8")
         assert '"M": 16' in source or "'M': 16" in source
         assert '"efConstruction": 200' in source or "'efConstruction': 200" in source
         assert "IP" in source, "距离度量应为 IP（内积）"
 
     def test_search_ef_is_64(self):
         """查询 ef 参数应为 64。"""
-        source = (SCRIPTS_DIR / "init_milvus.py").read_text(encoding="utf-8")
+        source = self.SCHEMA_PATH.read_text(encoding="utf-8")
         assert '"ef": 64' in source or "'ef': 64" in source
 
     def test_collection_name_is_fin_kb(self):
         """Collection 名称应为 fin_kb。"""
-        source = (SCRIPTS_DIR / "init_milvus.py").read_text(encoding="utf-8")
+        source = self.SCHEMA_PATH.read_text(encoding="utf-8")
         assert 'COLLECTION_NAME = "fin_kb"' in source
 
     def test_required_fields_exist(self):
         """所有 spec 要求的字段都应存在。"""
-        source = (SCRIPTS_DIR / "init_milvus.py").read_text(encoding="utf-8")
+        source = self.SCHEMA_PATH.read_text(encoding="utf-8")
         required_fields = [
             "id",
             "doc_id",

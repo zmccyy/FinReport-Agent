@@ -95,8 +95,12 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--log-le
 FROM python:3.11-slim AS dev
 
 # 同 runtime：受限网络可用 APT_MIRROR / PIP_INDEX_URL 覆盖（deploy/.env）。
+# TORCH_SPEC/TORCH_INSTALL_ARGS 复用 runtime 的 CPU wheel 规格（M5.09：
+# dev 需要知识库问答 embedding，否则 search_kb 在 dev 环境直接失败）。
 ARG APT_MIRROR=""
 ARG PIP_INDEX_URL=""
+ARG TORCH_SPEC=torch
+ARG TORCH_INSTALL_ARGS="--index-url https://download.pytorch.org/whl/cpu"
 WORKDIR /app
 
 RUN if [ -n "$APT_MIRROR" ]; then \
@@ -120,8 +124,15 @@ RUN if [ -n "$APT_MIRROR" ]; then \
 # docker-compose.dev.yml, so edits are picked up without rebuilding.
 COPY pyproject.toml .
 COPY app/ ./app/
+# M5.09：dev 镜像补装 torch（CPU）+ sentence-transformers。知识库问答
+# （search_kb → ModelHub.embed → BgeSmallEmbedder）是 M5 验收能力，dev
+# 环境必须可跑；其余重量级 prod 依赖（paddle/weasyprint/matplotlib）仍
+# 保持惰性 import、不装，控制 dev 镜像体积。
 RUN if [ -n "$PIP_INDEX_URL" ]; then export PIP_INDEX_URL; fi \
-    && pip install --no-cache-dir -e ".[dev]" minio pymilvus python-multipart pymysql
+    && pip install --no-cache-dir --retries 5 --timeout 120 \
+        ${TORCH_SPEC} ${TORCH_INSTALL_ARGS} \
+    && pip install --no-cache-dir -e ".[dev]" minio pymilvus python-multipart pymysql \
+    && pip install --no-cache-dir --retries 5 --timeout 120 sentence-transformers
 
 EXPOSE 8000
 
