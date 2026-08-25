@@ -53,31 +53,31 @@ class FlywayMigrationIT {
 
     @BeforeAll
     static void migrateFreshAndUpgradeSchemas() throws SQLException {
-        assertEquals(8, migrate(freshJdbcUrl()).migrationsExecuted,
-                "全新数据库应执行 V1 到 V8 共 8 个迁移");
+        assertEquals(9, migrate(freshJdbcUrl()).migrationsExecuted,
+                "全新数据库应执行 V1 到 V9 共 9 个迁移");
 
         assertEquals(7, migrateToVersion(upgradeJdbcUrl(), "7").migrationsExecuted,
                 "既有库应先执行 V1 到 V7");
-        assertEquals(1, migrate(upgradeJdbcUrl()).migrationsExecuted,
-                "既有 V7 库升级时应只执行 V8");
+        assertEquals(2, migrate(upgradeJdbcUrl()).migrationsExecuted,
+                "既有 V7 库升级时应执行 V8 + V9");
     }
 
     @Test
-    @DisplayName("全新库的迁移历史包含 V1 到 V8")
+    @DisplayName("全新库的迁移历史包含 V1 到 V9")
     void shouldMigrateAllVersionsOnFreshDatabase() throws SQLException {
-        assertEquals(8, countAppliedMigrations(freshJdbcUrl()), "应有 8 条成功迁移历史");
+        assertEquals(9, countAppliedMigrations(freshJdbcUrl()), "应有 9 条成功迁移历史");
     }
 
     @Test
-    @DisplayName("全新库包含 12 张 M1 业务表")
-    void shouldCreateAllM1Tables() throws SQLException {
+    @DisplayName("全新库包含 13 张业务表（含 V9 kb_chunks）")
+    void shouldCreateAllBusinessTables() throws SQLException {
         List<String> tables = new ArrayList<>(listTables(freshJdbcUrl(), FRESH_DATABASE));
         tables.remove("flyway_schema_history");
-        assertEquals(12, tables.size(), "应有 12 张业务表");
+        assertEquals(13, tables.size(), "应有 13 张业务表");
         for (String table : List.of(
                 "user_account", "report", "financial_statement", "accounting_check", "anomaly",
                 "report_artifact", "task", "task_step", "chat_session", "chat_message",
-                "model_registry", "audit_log")) {
+                "model_registry", "audit_log", "kb_chunks")) {
             assertTrue(tables.contains(table), "缺少表: " + table);
         }
     }
