@@ -223,7 +223,9 @@ public class ChatService {
     private Mono<ServerSentEvent<String>> handleEvent(
             ServerSentEvent<String> event, ChatSession session, Long userId, String userContent,
             TokenAccumulator accumulator) {
-        String eventName = event.event() == null ? "message" : event.event();
+        // event.event() 只取一次，避免三目内重复调用导致 spotbugs NP 误判
+        String eventNameValue = event.event();
+        String eventName = eventNameValue == null ? "message" : eventNameValue;
         switch (eventName) {
             case "token":
                 accumulator.append(event.data());

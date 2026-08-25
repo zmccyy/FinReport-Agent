@@ -53,6 +53,10 @@ public final class ChatDtos {
     @JsonPropertyOrder({"id", "role", "content", "toolsUsed", "createdAt"})
     public record ChatMessageResponse(
             Long id, String role, String content, List<String> toolsUsed, String createdAt) {
+        /** 防御性拷贝：toolsUsed 对外不可变（spotbugs EI_EXPOSE_REP）。 */
+        public ChatMessageResponse {
+            toolsUsed = toolsUsed == null ? List.of() : List.copyOf(toolsUsed);
+        }
     }
 
     /**
@@ -84,5 +88,9 @@ public final class ChatDtos {
             String companyContext,
             List<ChatTurn> history,
             String summary) {
+        /** 防御性拷贝：history 对外不可变（spotbugs EI_EXPOSE_REP）。 */
+        public ChatStreamRequest {
+            history = history == null ? List.of() : List.copyOf(history);
+        }
     }
 }

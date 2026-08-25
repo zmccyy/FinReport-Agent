@@ -78,6 +78,10 @@ public class SessionContextService {
      * @param turns   时间正序的最近对话轮次
      */
     public record SessionContext(String summary, List<ChatTurn> turns) {
+        /** 防御性拷贝：调用方无法改动返回的上下文（spotbugs EI_EXPOSE_REP）。 */
+        public SessionContext {
+            turns = turns == null ? List.of() : List.copyOf(turns);
+        }
     }
 
     /**
