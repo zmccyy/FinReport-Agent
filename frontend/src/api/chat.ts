@@ -2,6 +2,7 @@ import http from './http'
 import { refreshAccessToken } from './http'
 import { getAccessToken } from './token'
 import { SseParser } from './sse'
+import { createFlushQueue } from './stream-queue'
 import type { ChatMessage, ChatSession, ChatStreamEvent } from '@/types'
 
 /**
@@ -151,15 +152,24 @@ export function connectChatStream(
       const reader = response.body.getReader()
       const decoder = new TextDecoder('utf-8')
       const parser = new SseParser()
-      for (;;) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const events = parser.feed(decoder.decode(value, { stream: true }))
-        for (const evt of events) dispatch(evt)
-        if (terminal) {
-          await reader.cancel().catch(() => undefined)
-          return
+      // M6.02 背压：问答 token/step 事件成批 flush，缓冲 64 时阻塞读流
+      const queue = createFlushQueue<{ event: string; data: string }>(dispatch, { size: 64 })
+      try {
+        for (;;) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const events = parser.feed(decoder.decode(value, { stream: true }))
+          if (events.length > 0) {
+            await queue.push(events)
+          }
+          if (terminal) {
+            await reader.cancel().catch(() => undefined)
+            return
+          }
         }
+      } finally {
+        queue.flush()
+        queue.dispose()
       }
     } catch (err) {
       if (!closed && !terminal) {

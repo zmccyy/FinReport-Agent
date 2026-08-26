@@ -21,5 +21,17 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    // M6.02 vendor 拆分：element-plus / vue 系 / 应用代码互为长缓存 chunk，
+    // 小功能变更不失效大包；懒加载路由 chunk 从主包独立并行加载
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+          'vendor-element': ['element-plus', '@element-plus/icons-vue'],
+        },
+      },
+    },
+    // Element Plus 全量引入（M1 起）：vendor-element ≥ 1MB 属预期，不视为告警
+    chunkSizeWarningLimit: 1200,
   },
 })

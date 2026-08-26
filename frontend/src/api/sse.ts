@@ -1,5 +1,9 @@
 import { refreshAccessToken } from './http'
 import { getAccessToken } from './token'
+import { createFlushQueue } from './stream-queue'
+// SseParser 已在 sse-parser.ts 独立（Node 可单测），此处 re-export 保持旧引用
+export { SseParser } from './sse-parser'
+import { SseParser } from './sse-parser'
 import type { DoneEvent, ErrorEvent, ProgressEvent } from '@/types'
 
 /**
@@ -45,85 +49,6 @@ export interface TaskStreamConnection {
 
 const DEFAULT_MAX_RETRIES = 5
 const DEFAULT_RETRY_BASE_MS = 1000
-
-/** SSE 协议解析器：跨 chunk 维护半行与半事件状态。 */
-export class SseParser {
-  private buffer = ''
-  private eventType = 'message'
-  private dataLines: string[] = []
-  private eventId: string | undefined
-
-  /** 喂入一段文本，返回其中完整的事件。 */
-  feed(chunk: string): Array<{ event: string; data: string; id?: string }> {
-    this.buffer += chunk
-    const events: Array<{ event: string; data: string; id?: string }> = []
-    for (;;) {
-      // 优先匹配 \n（覆盖 LF 和 CRLF）
-      const lfIdx = this.buffer.indexOf('\n')
-      if (lfIdx >= 0) {
-        const lineEnd = lfIdx > 0 && this.buffer[lfIdx - 1] === '\r' ? lfIdx - 1 : lfIdx
-        const line = this.buffer.slice(0, lineEnd)
-        this.buffer = this.buffer.slice(lfIdx + 1)
-        const parsed = this.processLine(line)
-        if (parsed) events.push(parsed)
-        continue
-      }
-      // 无 \n：检查孤 \r（仅当后面有非 \n 字符，否则可能是跨 chunk CRLF）
-      const crIdx = this.buffer.indexOf('\r')
-      if (crIdx >= 0 && crIdx < this.buffer.length - 1) {
-        const line = this.buffer.slice(0, crIdx)
-        this.buffer = this.buffer.slice(crIdx + 1)
-        const parsed = this.processLine(line)
-        if (parsed) events.push(parsed)
-        continue
-      }
-      break // \r 在缓冲区末尾 → 延后，下个 chunk 判断是 CRLF 还是孤 \r
-    }
-    return events
-  }
-
-  private processLine(line: string): { event: string; data: string; id?: string } | null {
-    // 空行 = 事件边界，dispatch
-    if (line === '') {
-      if (this.dataLines.length > 0) {
-        const evt = { event: this.eventType, data: this.dataLines.join('\n'), id: this.eventId }
-        this.reset()
-        return evt
-      }
-      this.reset()
-      return null
-    }
-    // 注释行（心跳）以冒号开头，忽略
-    if (line.startsWith(':')) return null
-
-    const colon = line.indexOf(':')
-    const field = colon === -1 ? line : line.slice(0, colon)
-    let value = colon === -1 ? '' : line.slice(colon + 1)
-    if (value.startsWith(' ')) value = value.slice(1)
-
-    switch (field) {
-      case 'event':
-        this.eventType = value
-        break
-      case 'data':
-        this.dataLines.push(value)
-        break
-      case 'id':
-        this.eventId = value
-        break
-      default:
-        // retry 等字段忽略
-        break
-    }
-    return null
-  }
-
-  private reset(): void {
-    this.eventType = 'message'
-    this.dataLines = []
-    this.eventId = undefined
-  }
-}
 
 function newTraceId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -222,16 +147,28 @@ export function connectTaskStream(
     const reader = body.getReader()
     const decoder = new TextDecoder('utf-8')
     const parser = new SseParser()
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      const events = parser.feed(decoder.decode(value, { stream: true }))
-      for (const evt of events) dispatch(evt)
-      if (terminal) {
-        // 终态事件已处理，主动取消读取
-        await reader.cancel().catch(() => undefined)
-        return
+    // M6.02 背压：事件成批 flush，缓冲 64 时阻塞读流（spec §12.2）
+    const queue = createFlushQueue<{ event: string; data: string; id?: string }>(dispatch, {
+      size: 64,
+    })
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const events = parser.feed(decoder.decode(value, { stream: true }))
+        if (events.length > 0) {
+          await queue.push(events)
+        }
+        if (terminal) {
+          // 终态事件已处理，主动取消读取
+          await reader.cancel().catch(() => undefined)
+          return
+        }
       }
+    } finally {
+      // 流自然结束：flush 尾包再销毁（销毁本身清理定时器与等待者）
+      queue.flush()
+      queue.dispose()
     }
   }
 
