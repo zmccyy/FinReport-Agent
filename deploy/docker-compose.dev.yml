@@ -82,6 +82,9 @@ services:
         -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
         -Dspring.devtools.restart.enabled=true
         -Dspring.devtools.livereload.enabled=false
+      # dev 镜像无 otel-agent.jar（M6.07），覆盖 base 的 javaagent 挂载。
+      JAVA_TOOL_OPTIONS: ""
+      OTEL_TRACES_EXPORTER: none
       LOG_LEVEL: DEBUG
       # 仅供本地开发；生产环境必须通过受管密钥注入 JWT_SECRET。
       JWT_SECRET: ${JWT_SECRET:-finreport-dev-jwt-secret-must-be-at-least-32-characters}

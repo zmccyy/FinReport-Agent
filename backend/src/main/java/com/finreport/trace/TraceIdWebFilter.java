@@ -31,6 +31,11 @@ public class TraceIdWebFilter implements WebFilter {
         String traceId = resolveTraceId(exchange.getRequest());
         exchange.getResponse().getHeaders().set(TraceContext.TRACE_ID_HEADER, traceId);
 
+        // M6.07：业务 traceId 写入当前 OTel span attribute——Jaeger UI 可按
+        // finreport.traceId 标签检索，与日志（JSON logging 的 traceId 字段）
+        // 对齐。无 javaagent 时 Span.current() 为 INVALID_SPAN，setAttribute no-op。
+        io.opentelemetry.api.trace.Span.current().setAttribute("finreport.traceId", traceId);
+
         ServerWebExchange tracedExchange = exchange.mutate()
                 .request(exchange.getRequest().mutate()
                         .header(TraceContext.TRACE_ID_HEADER, traceId)

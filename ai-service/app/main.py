@@ -14,6 +14,7 @@ from app.api.parse import router as parse_router
 from app.core import metrics
 from app.core.config import Settings
 from app.core.exceptions import AiException
+from app.core.tracing import setup_tracing
 from app.mq.chat_consumer import ChatConsumer
 from app.mq.consumer import TaskConsumer
 from app.mq.producer import ProgressProducer
@@ -98,6 +99,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(parse_router)
     application.include_router(models_router)
     application.include_router(chat_router)
+    # M6.07：OTel 链路追踪（环境变量 OTEL_TRACES_ENABLED 驱动，默认关闭）。
+    setup_tracing(application)
     return application
 
 

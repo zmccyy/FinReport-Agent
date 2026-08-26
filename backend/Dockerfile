@@ -21,6 +21,14 @@ RUN --mount=type=cache,target=/root/.m2 \
     mvn package -DskipTests -B -q && \
     cp target/*.jar app.jar
 
+# M6.07：获取 OTel javaagent（runtime 镜像内由 JAVA_TOOL_OPTIONS 挂载，
+# dev stage 不复制——dev overlay 同步覆盖 JAVA_TOOL_OPTIONS 为空）。
+ARG OTEL_AGENT_VERSION=2.10.0
+RUN --mount=type=cache,target=/root/.m2 \
+    mvn dependency:copy \
+      -Dartifact=io.opentelemetry.javaagent:opentelemetry-javaagent:${OTEL_AGENT_VERSION} \
+      -DoutputDirectory=/build/otel -B -q
+
 # ================================================================================
 # Stage 2: Runtime
 # ================================================================================
@@ -35,6 +43,8 @@ RUN apk add --no-cache curl
 
 # 复制 JAR
 COPY --from=build /build/app.jar /app/app.jar
+# M6.07：OTel javaagent（compose 注入 JAVA_TOOL_OPTIONS=-javaagent 启用）
+COPY --from=build /build/otel/opentelemetry-javaagent-${OTEL_AGENT_VERSION}.jar /app/otel-agent.jar
 
 # 暴露端口
 EXPOSE 8080

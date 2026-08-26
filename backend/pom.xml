@@ -46,6 +46,14 @@
             <artifactId>micrometer-registry-prometheus</artifactId>
         </dependency>
 
+        <!-- M6.07：OTel API（运行时由 javaagent 提供实现；无 agent 时
+             GlobalOpenTelemetry no-op，不影响测试与本地开发） -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+            <version>1.44.1</version>
+        </dependency>
+
         <!-- Security (M1.08 启用) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

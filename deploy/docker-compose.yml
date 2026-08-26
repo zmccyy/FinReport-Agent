@@ -229,6 +229,9 @@ services:
       # M4.10 表格识别页面渲染 DPI（默认 200；内存受限环境可降 150，
       # 见 ai-service config.py parser_render_dpi 注释）
       PARSER_RENDER_DPI: ${PARSER_RENDER_DPI:-200}
+      # M6.07：OTel 链路追踪（tracing.py 按 OTEL_TRACES_ENABLED 启停）
+      OTEL_TRACES_ENABLED: ${OTEL_TRACES_ENABLED:-true}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
     ports:
       - "${AI_SERVICE_PORT:-8000}:8000"
     volumes:
@@ -262,6 +265,14 @@ services:
     restart: unless-stopped
     environment:
       JAVA_OPTS: "-Xms256m -Xmx512m"
+      # M6.07：OTel javaagent 挂载（镜像内 /app/otel-agent.jar；dev overlay
+      # 无此文件，覆盖为空关闭）。
+      JAVA_TOOL_OPTIONS: "-javaagent:/app/otel-agent.jar"
+      OTEL_SERVICE_NAME: finreport-backend
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      OTEL_TRACES_EXPORTER: otlp
+      OTEL_METRICS_EXPORTER: none
+      OTEL_LOGS_EXPORTER: none
       SPRING_PROFILES_ACTIVE: docker
       # JWT 签名密钥。base compose 不提供默认值（M4.10 审查修复 H3：
       # 此前的 52 字符开发默认值可绕过 JwtSecretValidator 在任意
@@ -386,6 +397,27 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+
+  # M6.07 链路追踪：all-in-one（内存存储，UI 16686 / OTLP gRPC 4317）。
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    container_name: finreport-jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      SPAN_STORAGE_TYPE: memory
+      MEMORY_MAX_TRACES: "50000"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"   # Jaeger UI
+      - "4317"                              # OTLP gRPC（仅栈内网络）
+    networks:
+      - finreport-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:14269/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 # ================================================================================
 # 持久化卷
