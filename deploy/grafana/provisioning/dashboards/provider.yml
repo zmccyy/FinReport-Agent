@@ -1,0 +1,15 @@
+# M6.06 Grafana 看板自动加载 — 从 /var/lib/grafana/dashboards（compose 只读挂载）。
+apiVersion: 1
+
+providers:
+  - name: finreport
+    orgId: 1
+    folder: FinReport
+    folderUid: finreport-folder
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 60
+    allowUiUpdates: false
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

@@ -1,0 +1,112 @@
+{
+  "uid": "finreport-business",
+  "title": "FinReport 业务看板",
+  "tags": ["finreport", "business"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "任务完成 / 失败",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "targets": [
+        { "expr": "sum(fin_task_total{outcome=\"completed\"})", "legendFormat": "完成", "refId": "A" },
+        { "expr": "sum(fin_task_total{outcome=\"failed\"})", "legendFormat": "失败", "refId": "B" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "任务成功率",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 0.8 },
+              { "color": "green", "value": 0.95 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "expr": "sum(fin_task_total{outcome=\"completed\"}) / clamp_min(sum(fin_task_total), 1)",
+          "legendFormat": "成功率",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "SSE 活跃连接",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "targets": [{ "expr": "fin_sse_active_connections", "legendFormat": "SSE", "refId": "A" }]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "MQ 发布速率（/min）",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "targets": [
+        { "expr": "rate(fin_mq_published_total[1m]) * 60", "legendFormat": "发布/分", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "任务阶段处理量（L3 消费侧）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (stage, outcome) (rate(fin_stage_total[5m]))",
+          "legendFormat": "{{stage}}/{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "步骤终态计数（L2 编排侧）",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(fin_step_total[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "阶段处理耗时 P95（对 SLA：PARSE<90s / EXTRACT<60s / CHECK<30s / REPORT<45s）",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (stage, le) (rate(fin_stage_duration_seconds_bucket[10m])))",
+          "legendFormat": "{{stage}} P95",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

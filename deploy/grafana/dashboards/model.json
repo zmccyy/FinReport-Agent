@@ -1,0 +1,126 @@
+{
+  "uid": "finreport-model",
+  "title": "FinReport 模型看板",
+  "tags": ["finreport", "model"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "DeepSeek 调用总数（按结果）",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (fin_llm_calls_total)",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "重试次数（按原因）",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (reason) (fin_llm_retries_total)",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Token 用量（prompt / completion）",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (type) (fin_llm_tokens_total)",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Embedding 调用（成功/失败）",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (fin_embed_total)",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "DeepSeek 调用速率（按结果）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (outcome) (rate(fin_llm_calls_total[5m]))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "DeepSeek P95 调用耗时",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, model) (rate(fin_llm_call_duration_seconds_bucket[10m])))",
+          "legendFormat": "{{model}} P95",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Token 消耗速率（成本观测）",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (type) (rate(fin_llm_tokens_total[5m])) * 3600",
+          "legendFormat": "{{type}} /小时",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Embedding 批次耗时 P95",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "finreport-prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(fin_embed_duration_seconds_bucket[10m])))",
+          "legendFormat": "embed P95",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

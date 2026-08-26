@@ -38,15 +38,16 @@ public class BusinessMetrics {
     private volatile int sseActive = 0;
 
     public BusinessMetrics(MeterRegistry registry) {
-        this.stepSuccessTotal = Counter.builder("fin_step_total")
+        // 命名约定：Counter 名不带 _total 后缀——Prometheus registry 会自动追加。
+        this.stepSuccessTotal = Counter.builder("fin_step")
                 .description("任务步骤终态总数")
                 .tag("outcome", "success")
                 .register(registry);
-        this.taskCompletedTotal = Counter.builder("fin_task_total")
+        this.taskCompletedTotal = Counter.builder("fin_task")
                 .description("任务终态总数")
                 .tag("outcome", "completed")
                 .register(registry);
-        this.taskFailedTotal = Counter.builder("fin_task_total")
+        this.taskFailedTotal = Counter.builder("fin_task")
                 .description("任务终态总数")
                 .tag("outcome", "failed")
                 .register(registry);
@@ -58,7 +59,7 @@ public class BusinessMetrics {
                 .builder("fin_sse_active_connections", this, self -> self.sseActive)
                 .description("SSE 活跃连接数")
                 .register(registry);
-        this.mqPublishedTotal = Counter.builder("fin_mq_published_total")
+        this.mqPublishedTotal = Counter.builder("fin_mq_published")
                 .description("MQ 任务消息发布总数")
                 .register(registry);
         log.debug("[BusinessMetrics] 业务指标已注册");

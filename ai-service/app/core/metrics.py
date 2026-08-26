@@ -52,13 +52,17 @@ except ImportError:  # pragma: no cover
 
 
 if _PROMETHEUS_AVAILABLE:
+    # 命名约定：Counter 名不带 _total 后缀——prometheus_client 会自动追加，
+    # 显式写 _total 会得到 `fin_xxx_total_total`。
     HTTP_REQUESTS_TOTAL = Counter(
-        "fin_http_requests_total", "HTTP 请求总数", ["method", "path", "status"]
+        "fin_http_requests", "HTTP 请求总数", ["method", "path", "status"]
     )
     HTTP_REQUEST_DURATION = Histogram(
         "fin_http_request_duration_seconds", "HTTP 请求耗时（秒）", ["method", "path"]
     )
-    STAGE_TOTAL = Counter("fin_stage_total", "任务阶段处理总数", ["stage", "outcome"])
+    STAGE_TOTAL = Counter(
+        "fin_stage", "任务阶段处理总数", ["stage", "outcome"]
+    )
     STAGE_DURATION = Histogram(
         "fin_stage_duration_seconds",
         "任务阶段处理耗时（秒）",
@@ -66,7 +70,7 @@ if _PROMETHEUS_AVAILABLE:
         buckets=(1, 5, 15, 30, 60, 120, 300, 600),
     )
     LLM_CALLS_TOTAL = Counter(
-        "fin_llm_calls_total", "LLM API 调用总数", ["model", "outcome"]
+        "fin_llm_calls", "LLM API 调用总数", ["model", "outcome"]
     )
     LLM_CALL_DURATION = Histogram(
         "fin_llm_call_duration_seconds",
@@ -75,12 +79,14 @@ if _PROMETHEUS_AVAILABLE:
         buckets=(0.5, 1, 2, 5, 10, 30, 60, 120, 300),
     )
     LLM_TOKENS_TOTAL = Counter(
-        "fin_llm_tokens_total", "LLM token 用量", ["model", "type"]
+        "fin_llm_tokens", "LLM token 用量", ["model", "type"]
     )
     LLM_RETRIES_TOTAL = Counter(
-        "fin_llm_retries_total", "LLM API 重试次数", ["model", "reason"]
+        "fin_llm_retries", "LLM API 重试次数", ["model", "reason"]
     )
-    EMBED_TOTAL = Counter("fin_embed_total", "embedding 调用总数", ["outcome"])
+    EMBED_TOTAL = Counter(
+        "fin_embed", "embedding 调用总数", ["outcome"]
+    )
     EMBED_DURATION = Histogram(
         "fin_embed_duration_seconds",
         "embedding 批次耗时（秒）",
