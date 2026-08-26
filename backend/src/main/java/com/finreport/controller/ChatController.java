@@ -18,6 +18,7 @@ import com.finreport.domain.dto.ChatDtos.ChatMessageResponse;
 import com.finreport.domain.dto.ChatDtos.ChatSessionResponse;
 import com.finreport.domain.dto.ChatDtos.CreateSessionRequest;
 import com.finreport.domain.dto.ChatDtos.SendMessageRequest;
+import com.finreport.ratelimit.RateLimit;
 import com.finreport.service.ChatService;
 
 import reactor.core.publisher.Flux;
@@ -49,6 +50,7 @@ public class ChatController {
      * @return 创建的会话
      */
     @PostMapping("/sessions")
+    @RateLimit(name = "chat-session-create", limit = 10, windowSeconds = 60)
     public Mono<ResponseEntity<ChatSessionResponse>> createSession(
             @RequestHeader("X-User-Id") Long userId,
             @RequestBody CreateSessionRequest request) {
@@ -97,6 +99,7 @@ public class ChatController {
      * @return text/event-stream 事件流
      */
     @PostMapping(value = "/sessions/{id}/messages", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    @RateLimit(name = "chat-send", limit = 10, windowSeconds = 60)
     public Flux<ServerSentEvent<String>> sendMessage(
             @PathVariable("id") Long sessionId,
             @RequestHeader("X-User-Id") Long userId,

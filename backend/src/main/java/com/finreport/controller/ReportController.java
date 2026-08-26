@@ -22,6 +22,7 @@ import com.finreport.domain.dto.ReportDetailResponse;
 import com.finreport.domain.dto.StatementsResponse;
 import com.finreport.domain.dto.UploadResponse;
 import com.finreport.exception.BusinessException;
+import com.finreport.ratelimit.RateLimit;
 import com.finreport.service.artifact.ArtifactQueryService;
 import com.finreport.service.file.FileService;
 import com.finreport.service.reasoner.AnomalyQueryService;
@@ -85,6 +86,7 @@ public class ReportController {
      * @return UploadResponse（HTTP 201）或错误（RFC 9457）
      */
     @PostMapping(value = "/reports/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @RateLimit(name = "report-upload", limit = 3, windowSeconds = 60)
     public Mono<ResponseEntity<UploadResponse>> upload(
             @RequestPart("file") Mono<FilePart> filePartMono,
             @RequestPart("companyCode") String companyCode,

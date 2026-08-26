@@ -18,6 +18,7 @@ import com.finreport.domain.dto.RefreshRequest;
 import com.finreport.domain.dto.RegisterRequest;
 import com.finreport.domain.dto.TokenResponse;
 import com.finreport.exception.AuthException;
+import com.finreport.ratelimit.RateLimit;
 import com.finreport.service.AuthService;
 
 import jakarta.validation.Valid;
@@ -50,6 +51,7 @@ public class AuthController {
      * @return Token 响应（HTTP 201）
      */
     @PostMapping("/auth/register")
+    @RateLimit(name = "auth-register", limit = 5, windowSeconds = 60, key = RateLimit.KeyType.IP)
     public Mono<ResponseEntity<TokenResponse>> register(@Valid @RequestBody RegisterRequest req) {
         log.debug("[AuthController] POST /auth/register username={}", req.username());
         return authService.register(req)
@@ -65,6 +67,7 @@ public class AuthController {
      * @return Token 响应
      */
     @PostMapping("/auth/login")
+    @RateLimit(name = "auth-login", limit = 5, windowSeconds = 60, key = RateLimit.KeyType.IP)
     public Mono<ResponseEntity<TokenResponse>> login(@Valid @RequestBody LoginRequest req) {
         log.debug("[AuthController] POST /auth/login username={}", req.username());
         return authService.login(req)
@@ -80,6 +83,7 @@ public class AuthController {
      * @return 新的 Token 响应
      */
     @PostMapping("/auth/refresh")
+    @RateLimit(name = "auth-refresh", limit = 10, windowSeconds = 60, key = RateLimit.KeyType.IP)
     public Mono<ResponseEntity<TokenResponse>> refresh(@Valid @RequestBody RefreshRequest req) {
         log.debug("[AuthController] POST /auth/refresh");
         return authService.refresh(req)
