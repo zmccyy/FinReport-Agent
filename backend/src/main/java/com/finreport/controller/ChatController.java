@@ -18,6 +18,7 @@ import com.finreport.domain.dto.ChatDtos.ChatMessageResponse;
 import com.finreport.domain.dto.ChatDtos.ChatSessionResponse;
 import com.finreport.domain.dto.ChatDtos.CreateSessionRequest;
 import com.finreport.domain.dto.ChatDtos.SendMessageRequest;
+import com.finreport.idempotent.Idempotent;
 import com.finreport.ratelimit.RateLimit;
 import com.finreport.service.ChatService;
 
@@ -51,6 +52,7 @@ public class ChatController {
      */
     @PostMapping("/sessions")
     @RateLimit(name = "chat-session-create", limit = 10, windowSeconds = 60)
+    @Idempotent(name = "chat-session-create")
     public Mono<ResponseEntity<ChatSessionResponse>> createSession(
             @RequestHeader("X-User-Id") Long userId,
             @RequestBody CreateSessionRequest request) {

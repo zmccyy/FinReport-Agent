@@ -6,6 +6,7 @@ import java.time.Duration;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -44,7 +45,9 @@ public class RateLimitWebFilter implements WebFilter {
     private final RequestMappingHandlerMapping handlerMapping;
     private final RateLimiter rateLimiter;
 
-    public RateLimitWebFilter(RequestMappingHandlerMapping handlerMapping, RateLimiter rateLimiter) {
+    public RateLimitWebFilter(
+            @Qualifier("requestMappingHandlerMapping") RequestMappingHandlerMapping handlerMapping,
+            RateLimiter rateLimiter) {
         this.handlerMapping = handlerMapping;
         this.rateLimiter = rateLimiter;
     }
