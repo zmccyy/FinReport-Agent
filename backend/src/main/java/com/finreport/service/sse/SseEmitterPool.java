@@ -27,6 +27,12 @@ public class SseEmitterPool {
     /** taskId → 任务专属 sink 与发射锁。 */
     private final ConcurrentHashMap<String, TaskSink> sinks = new ConcurrentHashMap<>();
 
+    private final com.finreport.metrics.BusinessMetrics metrics;
+
+    public SseEmitterPool(com.finreport.metrics.BusinessMetrics metrics) {
+        this.metrics = metrics;
+    }
+
     /**
      * 订阅某个任务的 SSE 事件流。
      *
@@ -35,10 +41,14 @@ public class SseEmitterPool {
      */
     public Flux<ServerSentEvent<String>> subscribe(String taskId) {
         TaskSink taskSink = sinks.computeIfAbsent(taskId, this::createTaskSink);
+        metrics.sseConnected();
         return taskSink.replaySink().asFlux()
                 .doOnCancel(() -> log.debug("[SseEmitterPool] 客户端取消订阅 taskId={} subCount={}",
                         taskId, taskSink.replaySink().currentSubscriberCount()))
-                .doOnTerminate(() -> log.debug("[SseEmitterPool] Flux 终止 taskId={}", taskId));
+                .doFinally(signal -> {
+                    metrics.sseDisconnected();
+                    log.debug("[SseEmitterPool] Flux 终止 taskId={} signal={}", taskId, signal);
+                });
     }
 
     /**

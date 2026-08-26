@@ -46,6 +46,7 @@ prod = [
     "python-multipart>=0.0.6",  # /parse/upload 端点
     "httpx>=0.27",           # Async HTTP client
     "PyMySQL>=1.1",          # M4.05 L3 只读 MySQL（check 数据通路查询侧）
+    "prometheus-client>=0.20",  # M6.05 /metrics 指标暴露
     # M4.07 本地 embedding（bge-small-zh-v1.5 CPU，spec §4.3；torch 自动随
     # CPU wheel 安装，M4.08 移除的仅是本地 LLM 训练/推理栈）
     "sentence-transformers>=2.7",
@@ -63,6 +64,7 @@ dev = [
     "ruff>=0.2",
     "black>=24.0",
     "httpx>=0.27",
+    "prometheus-client>=0.20",  # M6.05 单测（与 prod 一致）
 ]
 
 [tool.ruff]

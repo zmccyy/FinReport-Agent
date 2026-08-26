@@ -13,6 +13,7 @@ from threading import Event, Lock, Thread
 from typing import Any, Awaitable, Callable
 
 from app.core.config import Settings
+from app.core.metrics import StageTimer
 from app.schemas.task import TaskMessage
 from app.modules.extractor.handler import handle as extract_handler
 from app.modules.generator.handler import handle as generator_handler
@@ -101,7 +102,9 @@ class TaskConsumer:
             target=self._process_loop, name="finreport-mq-worker", daemon=True
         )
         self._worker_thread.start()
-        self.thread = Thread(target=self._consume, name="finreport-mq-consumer", daemon=True)
+        self.thread = Thread(
+            target=self._consume, name="finreport-mq-consumer", daemon=True
+        )
         self.thread.start()
 
     def _consume(self) -> None:
@@ -137,7 +140,9 @@ class TaskConsumer:
                     self.connection.process_data_events(time_limit=1)
             except Exception:
                 if not self.stop_event.is_set():
-                    LOGGER.exception("M1 task consumer lost broker connection; reconnecting")
+                    LOGGER.exception(
+                        "M1 task consumer lost broker connection; reconnecting"
+                    )
                     self.stop_event.wait(self.settings.rabbitmq_reconnect_delay_seconds)
             finally:
                 if self.connection is not None and self.connection.is_open:
@@ -185,9 +190,12 @@ class TaskConsumer:
         assert self._loop is not None
         try:
             try:
-                result = self._loop.run_until_complete(handler(task))
+                with StageTimer(step_name):
+                    result = self._loop.run_until_complete(handler(task))
             except Exception as error:
-                LOGGER.exception("Task handler failed routingKey=%s", method.routing_key)
+                LOGGER.exception(
+                    "Task handler failed routingKey=%s", method.routing_key
+                )
                 try:
                     self._publish_progress(
                         task,
@@ -220,7 +228,9 @@ class TaskConsumer:
             with self._in_flight_lock:
                 self._in_flight.discard((task.task_id, task.step))
 
-    def on_message(self, channel: Any, method: Any, properties: Any, body: bytes) -> None:
+    def on_message(
+        self, channel: Any, method: Any, properties: Any, body: bytes
+    ) -> None:
         """Validate one delivery and hand it to the worker thread.
 
         Malformed deliveries cannot be correlated safely and therefore go directly to the DLQ.
@@ -270,12 +280,15 @@ class TaskConsumer:
         died in the meantime, the broker redelivers the message and the task
         is reprocessed — progress idempotency keys make that safe.
         """
-        self._schedule_threadsafe(channel, lambda: channel.basic_ack(delivery_tag=delivery_tag))
+        self._schedule_threadsafe(
+            channel, lambda: channel.basic_ack(delivery_tag=delivery_tag)
+        )
 
     def _nack_threadsafe(self, channel: Any, delivery_tag: Any) -> None:
         """Schedule ``basic_nack(requeue=False)`` (DLQ routing) on the I/O thread."""
         self._schedule_threadsafe(
-            channel, lambda: channel.basic_nack(delivery_tag=delivery_tag, requeue=False)
+            channel,
+            lambda: channel.basic_nack(delivery_tag=delivery_tag, requeue=False),
         )
 
     def _schedule_threadsafe(self, channel: Any, operation: Callable[[], Any]) -> None:
@@ -309,7 +322,9 @@ class TaskConsumer:
         try:
             connection.add_callback_threadsafe(guarded)
         except Exception:
-            LOGGER.warning("Could not schedule channel operation; delivery will be redelivered")
+            LOGGER.warning(
+                "Could not schedule channel operation; delivery will be redelivered"
+            )
 
     def _publish_progress(
         self,

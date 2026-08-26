@@ -102,7 +102,9 @@ class TaskOrchestratorTest {
         orchestrator = new TaskOrchestrator(
                 taskRepo, stepRepo, stateMachine, messageProducer, databaseClient, transactionalOperator,
                 extractDispatcher, extractTracker, statementWriter, extractCacheService,
-                checkResultWriter, reportArtifactWriter, reportRepo);
+                checkResultWriter, reportArtifactWriter, reportRepo,
+                new com.finreport.metrics.BusinessMetrics(
+                        new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         // M2.09: StatementWriter returns 0 by default; individual tests override when needed.
         lenient().when(statementWriter.writeStatement(anyString(), anyString(), any()))
                 .thenReturn(Mono.just(0));

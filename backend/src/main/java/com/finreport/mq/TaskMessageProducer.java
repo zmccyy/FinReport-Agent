@@ -34,10 +34,13 @@ public class TaskMessageProducer {
 
     private final RabbitTemplate rabbitTemplate;
     private final ObjectMapper objectMapper;
+    private final com.finreport.metrics.BusinessMetrics metrics;
 
-    public TaskMessageProducer(RabbitTemplate rabbitTemplate) {
+    public TaskMessageProducer(RabbitTemplate rabbitTemplate,
+                               com.finreport.metrics.BusinessMetrics metrics) {
         this.rabbitTemplate = rabbitTemplate;
         this.objectMapper = new ObjectMapper();
+        this.metrics = metrics;
     }
 
     /**
@@ -107,6 +110,7 @@ public class TaskMessageProducer {
             props.setHeader("x-retry-count", retryCount);
             rabbitTemplate.convertAndSend(exchange, step,
                     new Message(objectMapper.writeValueAsBytes(messageBody), props));
+            metrics.recordMqPublished();
             log.info("[TaskMessageProducer] 消息已发布 exchange={} routingKey={} taskId={} step={} retry={}",
                     exchange, step, taskId, step, retryCount);
         } catch (Exception error) {

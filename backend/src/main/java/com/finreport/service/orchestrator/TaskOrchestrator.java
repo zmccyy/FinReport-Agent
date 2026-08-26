@@ -63,6 +63,7 @@ public class TaskOrchestrator {
     private final CheckResultWriter checkResultWriter;
     private final ReportArtifactWriter reportArtifactWriter;
     private final ReportRepository reportRepo;
+    private final com.finreport.metrics.BusinessMetrics metrics;
 
     public TaskOrchestrator(
             TaskRepository taskRepo,
@@ -77,7 +78,8 @@ public class TaskOrchestrator {
             ExtractCacheService extractCacheService,
             CheckResultWriter checkResultWriter,
             ReportArtifactWriter reportArtifactWriter,
-            ReportRepository reportRepo) {
+            ReportRepository reportRepo,
+            com.finreport.metrics.BusinessMetrics metrics) {
         this.taskRepo = taskRepo;
         this.stepRepo = stepRepo;
         this.stateMachine = stateMachine;
@@ -91,6 +93,7 @@ public class TaskOrchestrator {
         this.checkResultWriter = checkResultWriter;
         this.reportArtifactWriter = reportArtifactWriter;
         this.reportRepo = reportRepo;
+        this.metrics = metrics;
     }
 
     /**
@@ -162,6 +165,7 @@ public class TaskOrchestrator {
                     task.setStatus(TaskStatus.FAILED.name());
                     task.setErrorMsg(errorMsg);
                     task.setFinishedAt(LocalDateTime.now());
+                    metrics.recordTaskFailed();
                     return taskRepo.save(task);
                 });
     }
@@ -513,6 +517,7 @@ public class TaskOrchestrator {
                         step.setDurationMs((int) java.time.Duration.between(
                                 step.getStartedAt(), LocalDateTime.now()).toMillis());
                     }
+                    metrics.recordStepSuccess(stepName, step.getDurationMs() == null ? 0L : step.getDurationMs());
                     return stepRepo.save(step)
                             .then(updateTaskProgress(task, stepName))
                             .flatMap(updatedTask -> {
@@ -695,6 +700,7 @@ public class TaskOrchestrator {
                         saved.setStatus(TaskStatus.COMPLETED.name());
                         saved.setFinishedAt(LocalDateTime.now());
                         saved.setProgress(PROGRESS_REPORT);
+                        metrics.recordTaskCompleted();
                         return taskRepo.save(saved);
                     }
                     String next = stateMachine.nextStepAfter(stepName);

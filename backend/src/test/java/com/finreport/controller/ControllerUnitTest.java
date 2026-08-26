@@ -105,7 +105,7 @@ class ControllerUnitTest {
 
     @Test
     void shouldReturnTaskForOwnerAndHideForeignTask() {
-        TaskController controller = new TaskController(orchestrator, new SseEmitterPool());
+        TaskController controller = new TaskController(orchestrator, new SseEmitterPool(new com.finreport.metrics.BusinessMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry())));
         Task task = task("task-1", TaskStatus.PARSE_RUNNING);
         when(orchestrator.findByIdAndUserId("task-1", 7L)).thenReturn(Mono.just(task));
         when(orchestrator.findByIdAndUserId("task-1", 8L)).thenReturn(Mono.empty());
@@ -119,7 +119,7 @@ class ControllerUnitTest {
 
     @Test
     void shouldHideForeignStreamAndEmitTerminalFallbackForOwner() {
-        TaskController controller = new TaskController(orchestrator, new SseEmitterPool());
+        TaskController controller = new TaskController(orchestrator, new SseEmitterPool(new com.finreport.metrics.BusinessMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry())));
         Task task = task("task-terminal", TaskStatus.COMPLETED);
         task.setRefReportId(99L);
         when(orchestrator.findByIdAndUserId("task-terminal", 7L)).thenReturn(Mono.just(task));
@@ -139,7 +139,7 @@ class ControllerUnitTest {
 
     @Test
     void shouldCancelOnlyOwnedTask() {
-        TaskController controller = new TaskController(orchestrator, new SseEmitterPool());
+        TaskController controller = new TaskController(orchestrator, new SseEmitterPool(new com.finreport.metrics.BusinessMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry())));
         Task cancelled = task("task-cancel", TaskStatus.CANCELLED);
         when(orchestrator.cancelTask("task-cancel", 7L)).thenReturn(Mono.just(cancelled));
         when(orchestrator.cancelTask("task-cancel", 8L)).thenReturn(Mono.error(

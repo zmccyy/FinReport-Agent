@@ -33,7 +33,7 @@ class TaskMessageProducerTest {
     @Test
     @DisplayName("should preserve explicit trace ID in RabbitMQ headers")
     void shouldPreserveExplicitTraceIdInRabbitMqHeaders() {
-        TaskMessageProducer producer = new TaskMessageProducer(rabbitTemplate);
+        TaskMessageProducer producer = new TaskMessageProducer(rabbitTemplate, new com.finreport.metrics.BusinessMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
 
         producer.publishTaskStep("task-1", "parse", Map.of("pdfObjectKey", "reports/a.pdf"),
@@ -50,7 +50,7 @@ class TaskMessageProducerTest {
     @Test
     @DisplayName("should publish persistent retry messages to every delay exchange")
     void shouldPublishPersistentRetryMessagesToEveryDelayExchange() {
-        TaskMessageProducer producer = new TaskMessageProducer(rabbitTemplate);
+        TaskMessageProducer producer = new TaskMessageProducer(rabbitTemplate, new com.finreport.metrics.BusinessMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
 
         producer.publishRetry("task-retry", "PARSE", Map.of("pdfObjectKey", "users/1/report.pdf"),
@@ -73,7 +73,7 @@ class TaskMessageProducerTest {
     @Test
     @DisplayName("should generate trace ID when caller does not provide one")
     void shouldGenerateTraceIdWhenCallerDoesNotProvideOne() {
-        TaskMessageProducer producer = new TaskMessageProducer(rabbitTemplate);
+        TaskMessageProducer producer = new TaskMessageProducer(rabbitTemplate, new com.finreport.metrics.BusinessMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         ArgumentCaptor<Message> messageCaptor = ArgumentCaptor.forClass(Message.class);
 
         producer.publishTaskStep("task-new-trace", "PARSE", Map.of(), " ");
@@ -87,7 +87,7 @@ class TaskMessageProducerTest {
     @Test
     @DisplayName("should reject retry count outside three configured buckets")
     void shouldRejectRetryCountOutsideThreeConfiguredBuckets() {
-        TaskMessageProducer producer = new TaskMessageProducer(rabbitTemplate);
+        TaskMessageProducer producer = new TaskMessageProducer(rabbitTemplate, new com.finreport.metrics.BusinessMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
 
         assertThrows(IllegalArgumentException.class,
                 () -> producer.publishRetry("task-invalid", "PARSE", Map.of(), 4, "trace"));
@@ -96,7 +96,7 @@ class TaskMessageProducerTest {
     @Test
     @DisplayName("should wrap RabbitMQ publishing errors as integration exception")
     void shouldWrapRabbitMqPublishingErrorsAsIntegrationException() {
-        TaskMessageProducer producer = new TaskMessageProducer(rabbitTemplate);
+        TaskMessageProducer producer = new TaskMessageProducer(rabbitTemplate, new com.finreport.metrics.BusinessMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
         doThrow(new IllegalStateException("broker unavailable")).when(rabbitTemplate)
                 .convertAndSend(any(String.class), any(String.class), any(Message.class));
 

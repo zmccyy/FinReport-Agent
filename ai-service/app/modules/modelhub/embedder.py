@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.core import metrics
 from app.core.config import Settings
 from app.core.exceptions import AiException, ModelLoadException
 from app.utils.logger import get_logger
@@ -166,23 +168,30 @@ class BgeSmallEmbedder:
             return []
         if not all(isinstance(t, str) for t in texts):
             raise AiException("embed() expects a list of str texts")
-        with self._lock:
-            self._load_locked()
-            encoder = self._encoder
-            assert encoder is not None  # locked invariant: load ran above
-            try:
-                raw = encoder.encode(
-                    texts,
-                    normalize_embeddings=True,
-                    batch_size=EMBED_BATCH_SIZE,
-                    show_progress_bar=False,
-                )
-            except AiException:
-                raise
-            except Exception as exc:
-                raise AiException(f"Embedding inference failed: {exc}") from exc
-        vectors = self._to_float_rows(raw, len(texts))
-        self._validate_contract(vectors)
+        started = time.monotonic()
+        try:
+            with self._lock:
+                self._load_locked()
+                encoder = self._encoder
+                assert encoder is not None  # locked invariant: load ran above
+                try:
+                    raw = encoder.encode(
+                        texts,
+                        normalize_embeddings=True,
+                        batch_size=EMBED_BATCH_SIZE,
+                        show_progress_bar=False,
+                    )
+                except AiException:
+                    raise
+                except Exception as exc:
+                    raise AiException(f"Embedding inference failed: {exc}") from exc
+            vectors = self._to_float_rows(raw, len(texts))
+            self._validate_contract(vectors)
+        except Exception:
+            metrics.EMBED_TOTAL.labels(outcome="failed").inc()
+            raise
+        metrics.EMBED_TOTAL.labels(outcome="ok").inc()
+        metrics.EMBED_DURATION.observe(time.monotonic() - started)
         return vectors
 
     @staticmethod

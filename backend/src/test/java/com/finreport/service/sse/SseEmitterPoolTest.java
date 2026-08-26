@@ -31,7 +31,8 @@ class SseEmitterPoolTest {
 
     @BeforeEach
     void setUp() {
-        pool = new SseEmitterPool();
+        pool = new SseEmitterPool(
+                new com.finreport.metrics.BusinessMetrics(new io.micrometer.core.instrument.simple.SimpleMeterRegistry()));
     }
 
     @Nested

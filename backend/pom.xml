@@ -40,6 +40,12 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- M6.05 Prometheus 指标（/actuator/prometheus） -->
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
+
         <!-- Security (M1.08 启用) -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

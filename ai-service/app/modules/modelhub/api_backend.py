@@ -20,6 +20,7 @@ from typing import Any
 
 import httpx
 
+from app.core import metrics
 from app.core.config import Settings
 from app.core.exceptions import (
     AiException,
@@ -156,6 +157,7 @@ class DeepSeekBackend:
         start = time.perf_counter()
 
         for attempt in range(1, max_attempts + 1):
+            model = self.settings.llm_api_model
             try:
                 response = self._client.post(
                     "/chat/completions",
@@ -164,18 +166,36 @@ class DeepSeekBackend:
                 )
                 response.raise_for_status()
                 latency_ms = (time.perf_counter() - start) * 1000.0
-                return self._parse_response(response, latency_ms)
+                result = self._parse_response(response, latency_ms)
+                metrics.LLM_CALLS_TOTAL.labels(model=model, outcome="ok").inc()
+                metrics.LLM_CALL_DURATION.labels(model=model).observe(
+                    latency_ms / 1000.0
+                )
+                metrics.LLM_TOKENS_TOTAL.labels(model=model, type="prompt").inc(
+                    result.prompt_tokens
+                )
+                metrics.LLM_TOKENS_TOTAL.labels(model=model, type="completion").inc(
+                    result.completion_tokens
+                )
+                return result
             except httpx.TimeoutException as error:
+                metrics.LLM_CALLS_TOTAL.labels(model=model, outcome="timeout").inc()
                 raise InferenceTimeoutException(
                     f"DeepSeek API timed out after {timeout_seconds:.1f}s"
                 ) from error
             except httpx.HTTPStatusError as error:
                 status_code = error.response.status_code
                 if status_code not in _RETRYABLE_STATUS_CODES:
+                    metrics.LLM_CALLS_TOTAL.labels(
+                        model=model, outcome="client_error"
+                    ).inc()
                     raise AiException(
                         f"DeepSeek API returned {status_code}: {error.response.text[:200]}"
                     ) from error
                 last_error = error
+                metrics.LLM_RETRIES_TOTAL.labels(
+                    model=model, reason=f"http_{status_code}"
+                ).inc()
                 LOGGER.warning(
                     "[DeepSeekBackend] retryable status=%s attempt=%d/%d",
                     status_code,
@@ -184,6 +204,7 @@ class DeepSeekBackend:
                 )
             except httpx.TransportError as error:
                 last_error = error
+                metrics.LLM_RETRIES_TOTAL.labels(model=model, reason="network").inc()
                 LOGGER.warning(
                     "[DeepSeekBackend] network error=%s attempt=%d/%d",
                     type(error).__name__,
@@ -192,11 +213,18 @@ class DeepSeekBackend:
                 )
 
             if attempt < max_attempts:
-                delay = self.settings.llm_api_retry_base_delay_seconds * (2 ** (attempt - 1))
+                delay = self.settings.llm_api_retry_base_delay_seconds * (
+                    2 ** (attempt - 1)
+                )
                 LOGGER.info("[DeepSeekBackend] retrying in %.1fs", delay)
                 time.sleep(delay)
 
-        raise AiException(f"DeepSeek API failed after {max_attempts} attempts: {last_error}")
+        metrics.LLM_CALLS_TOTAL.labels(
+            model=self.settings.llm_api_model, outcome="exhausted"
+        ).inc()
+        raise AiException(
+            f"DeepSeek API failed after {max_attempts} attempts: {last_error}"
+        )
 
     def unload(self) -> None:
         """Close the HTTP client (no device memory to free)."""
