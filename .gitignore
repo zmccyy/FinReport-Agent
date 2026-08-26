@@ -84,6 +84,9 @@ data/training/
 *.log
 logs/
 artifacts/
+# Playwright 产物（前端 E2E）
+frontend/test-results/
+frontend/playwright-report/
 
 # --- OS ---
 *.tmp

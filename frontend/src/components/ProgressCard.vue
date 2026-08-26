@@ -216,13 +216,13 @@ function extractTagType(status: StageStatus): 'success' | 'danger' | 'primary' |
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #d0d6dd;
+  background: var(--fin-fill-muted);
   transition: background 0.2s ease;
 }
 
 .conn--on .conn__dot {
   background: var(--fin-success);
-  box-shadow: 0 0 0 3px rgba(39, 174, 96, 0.18);
+  box-shadow: 0 0 0 3px var(--fin-success-subtle);
 }
 
 .progress-card__bar {

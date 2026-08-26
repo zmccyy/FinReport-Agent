@@ -2,6 +2,7 @@
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import AppHeader from '@/components/AppHeader.vue'
+import EmptyState from '@/components/common/EmptyState.vue'
 import { useReportsStore, type TrackedReport } from '@/stores/reports'
 
 /**
@@ -92,16 +93,21 @@ function goUpload(): void {
         <el-button type="primary" :icon="'Upload'" @click="goUpload">上传财报</el-button>
       </div>
 
-      <!-- 空态 -->
-      <div v-if="reportsStore.sorted.length === 0" class="empty fin-card fin-fade-up">
-        <el-icon class="empty__icon"><FolderOpened /></el-icon>
-        <p class="empty__title">还没有上传任何财报</p>
-        <p class="empty__sub">上传一份 PDF 年报，体验解析 → 抽取 → 勾稽 → 报告全流程</p>
-        <el-button type="primary" @click="goUpload">立即上传</el-button>
-      </div>
+      <!-- 空态（M6.01 通用组件） -->
+      <EmptyState
+        v-if="reportsStore.sorted.length === 0"
+        class="fin-fade-up"
+        icon="FolderOpened"
+        title="还没有上传任何财报"
+        description="上传一份 PDF 年报，体验解析 → 抽取 → 勾稽 → 报告全流程"
+      >
+        <template #action>
+          <el-button type="primary" @click="goUpload">立即上传</el-button>
+        </template>
+      </EmptyState>
 
       <!-- 列表 -->
-      <div v-else class="list fin-card fin-fade-up">
+      <div v-else class="list fin-card fin-fade-up fin-table-scroll">
         <el-table :data="reportsStore.sorted" style="width: 100%">
           <el-table-column label="公司" min-width="180">
             <template #default="{ row }">
@@ -175,32 +181,6 @@ function goUpload(): void {
 
 .page__sub {
   margin-top: 6px;
-  font-size: 14px;
-  color: var(--fin-text-secondary);
-}
-
-.empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 72px 24px;
-  text-align: center;
-}
-
-.empty__icon {
-  font-size: 56px;
-  color: var(--fin-primary-lighter);
-  margin-bottom: 16px;
-}
-
-.empty__title {
-  font-size: 17px;
-  font-weight: 700;
-  color: var(--fin-text-primary);
-}
-
-.empty__sub {
-  margin: 8px 0 24px;
   font-size: 14px;
   color: var(--fin-text-secondary);
 }

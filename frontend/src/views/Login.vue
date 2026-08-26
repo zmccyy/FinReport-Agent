@@ -3,6 +3,7 @@ import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
+import ThemeToggle from '@/components/common/ThemeToggle.vue'
 import { useAuthStore } from '@/stores/auth'
 import { ApiError } from '@/api/errors'
 
@@ -102,6 +103,11 @@ async function submit(): Promise<void> {
 
     <!-- 表单区 -->
     <main class="auth__panel">
+      <!-- M6.01：登录页也提供主题切换（暗黑用户登入前即生效） -->
+      <div class="auth__theme">
+        <ThemeToggle />
+      </div>
+
       <div class="panel__card fin-fade-up">
         <el-tabs :model-value="mode" class="panel__tabs" @update:model-value="switchMode">
           <el-tab-pane label="登录" name="login" />
@@ -306,6 +312,16 @@ async function submit(): Promise<void> {
 
 .panel__link:hover {
   text-decoration: underline;
+}
+
+.auth__theme {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+.auth__panel {
+  position: relative;
 }
 
 /* 窄屏堆叠 */

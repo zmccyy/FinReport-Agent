@@ -1,8 +1,12 @@
 :root {
+  color-scheme: light;
+
   /* 背景层级 */
   --fin-bg: #f7f7f8;
   --fin-surface: #ffffff;
   --fin-surface-elevated: #ffffff;
+  --fin-header-bg: rgba(255, 255, 255, 0.82);
+  --fin-fill-muted: #d0d6dd;
 
   /* 文字层级 */
   --fin-text-primary: #111113;
@@ -52,6 +56,54 @@
   --el-color-primary: var(--fin-primary);
 }
 
+/* M6.01 暗黑模式：html.dark 时整套 --fin-* 覆盖（useTheme.ts 切换）。 */
+html.dark {
+  color-scheme: dark;
+
+  --fin-bg: #101014;
+  --fin-surface: #17171c;
+  --fin-surface-elevated: #1d1d24;
+  --fin-header-bg: rgba(23, 23, 28, 0.85);
+  --fin-fill-muted: #3a3a44;
+
+  --fin-text-primary: #f0f0f4;
+  --fin-text-regular: #d4d4da;
+  --fin-text-secondary: #9a9aa4;
+  --fin-text-tertiary: #6a6a74;
+
+  --fin-border: #2a2a32;
+  --fin-border-strong: #38384a;
+  --fin-divider: #24242c;
+
+  --fin-primary: #4d8dff;
+  --fin-primary-light: #6ba3ff;
+  --fin-primary-lighter: #8ab5ff;
+  --fin-primary-bg: rgba(77, 141, 255, 0.12);
+  --fin-primary-subtle: rgba(77, 141, 255, 0.16);
+
+  --fin-success: #34d399;
+  --fin-success-bg: rgba(16, 185, 129, 0.12);
+  --fin-success-subtle: rgba(16, 185, 129, 0.16);
+  --fin-warning: #fbbf24;
+  --fin-warning-bg: rgba(245, 158, 11, 0.12);
+  --fin-warning-subtle: rgba(245, 158, 11, 0.16);
+  --fin-danger: #f87171;
+  --fin-danger-bg: rgba(239, 68, 68, 0.12);
+  --fin-danger-subtle: rgba(239, 68, 68, 0.16);
+  --fin-info: #818cf8;
+  --fin-info-bg: rgba(99, 102, 241, 0.12);
+  --fin-info-subtle: rgba(99, 102, 241, 0.16);
+
+  --fin-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --fin-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --fin-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --fin-shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.5);
+
+  /* Element Plus dark css-vars 内的 --el-color-primary 是 EP 默认蓝，
+     此处后声明覆盖回品牌蓝（与 :root 层对齐）。 */
+  --el-color-primary: var(--fin-primary);
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -80,6 +132,18 @@ body {
   max-width: 1280px;
   margin: 0 auto;
   padding: 0 24px;
+}
+
+/* M6.01 响应式断点：<768 手机收窄内边距；≥768 平板恢复正常。 */
+@media (max-width: 767px) {
+  .fin-container {
+    padding: 0 16px;
+  }
+}
+
+/* 表格窄屏横向滚动兜底（与 el-table 内建滚动配合） */
+.fin-table-scroll {
+  overflow-x: auto;
 }
 
 /* 通用卡片 */

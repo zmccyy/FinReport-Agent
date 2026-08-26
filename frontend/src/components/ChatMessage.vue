@@ -68,6 +68,7 @@ const timeText = computed(() => {
           <div v-if="content" class="chat-msg__md">
             <!-- 渲染前经 renderMarkdown 转义全部 HTML 特殊字符（utils/markdown.ts），
                  与 ReportViewer 同一安全路径，无 XSS 面 -->
+            <!-- eslint-disable-next-line vue/no-v-html -->
             <div class="fin-md" v-html="renderedMd" />
             <span v-if="streaming" class="chat-msg__cursor" aria-hidden="true"></span>
           </div>
@@ -107,7 +108,11 @@ const timeText = computed(() => {
 }
 
 .chat-msg:not(.chat-msg--user) .chat-msg__avatar {
-  background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%);
+  background: linear-gradient(
+    135deg,
+    var(--fin-primary-bg) 0%,
+    var(--fin-primary-subtle) 100%
+  );
   color: var(--fin-primary);
   border: 1px solid var(--fin-border);
 }

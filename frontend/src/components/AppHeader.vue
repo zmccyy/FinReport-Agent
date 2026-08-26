@@ -2,10 +2,11 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import ThemeToggle from '@/components/common/ThemeToggle.vue'
 import { useAuthStore } from '@/stores/auth'
 
 /**
- * 认证页面共享顶栏：品牌标识 + 主导航 + 用户菜单。
+ * 认证页面共享顶栏：品牌标识 + 主导航 + 主题切换 + 用户菜单。
  */
 const route = useRoute()
 const router = useRouter()
@@ -54,6 +55,8 @@ async function handleLogout(): Promise<void> {
         </router-link>
       </nav>
 
+      <ThemeToggle />
+
       <el-dropdown trigger="click">
         <button class="user" type="button">
           <span class="user__avatar">{{ username.charAt(0).toUpperCase() }}</span>
@@ -80,7 +83,7 @@ async function handleLogout(): Promise<void> {
   position: sticky;
   top: 0;
   z-index: 100;
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--fin-header-bg);
   border-bottom: 1px solid var(--fin-border);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
@@ -91,6 +94,26 @@ async function handleLogout(): Promise<void> {
   align-items: center;
   height: 56px;
   gap: 32px;
+}
+
+/* M6.01 响应式：窄屏收窄间距并隐藏品牌全名 */
+@media (max-width: 767px) {
+  .app-header__inner {
+    gap: 12px;
+  }
+
+  .brand__name {
+    display: none;
+  }
+
+  .nav__item {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  .user__name {
+    display: none;
+  }
 }
 
 .brand {

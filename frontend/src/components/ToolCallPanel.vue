@@ -127,7 +127,7 @@ function resultSummary(step: ReactStep): string {
 .tool-step {
   border: 1px solid var(--fin-border);
   border-radius: var(--fin-radius-sm);
-  background: linear-gradient(180deg, #fafafa 0%, #ffffff 100%);
+  background: linear-gradient(180deg, var(--fin-bg) 0%, var(--fin-surface) 100%);
   overflow: hidden;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
@@ -144,7 +144,7 @@ function resultSummary(step: ReactStep): string {
 
 @keyframes tool-step-pulse {
   0%, 100% { box-shadow: 0 0 0 3px var(--fin-primary-subtle); }
-  50% { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16); }
+  50% { box-shadow: 0 0 0 3px var(--fin-primary-bg); }
 }
 
 .tool-step__head {
@@ -269,7 +269,7 @@ function resultSummary(step: ReactStep): string {
   font-size: 11.5px;
   line-height: 1.55;
   color: var(--fin-text-regular);
-  background: #f6f7f9;
+  background: var(--fin-bg);
   border: 1px solid var(--fin-border);
   border-radius: 6px;
   padding: 6px 8px;

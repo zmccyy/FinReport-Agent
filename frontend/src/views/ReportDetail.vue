@@ -3,6 +3,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import AppHeader from '@/components/AppHeader.vue'
+import PageLoading from '@/components/common/PageLoading.vue'
+import ErrorState from '@/components/common/ErrorState.vue'
 import StatementTable from '@/components/StatementTable.vue'
 import CheckList from '@/components/CheckList.vue'
 import AnomalyList from '@/components/AnomalyList.vue'
@@ -207,18 +209,14 @@ function onTabChange(name: string): void {
         </div>
       </div>
 
-      <!-- Loading -->
-      <div v-if="store.loading" class="fin-card fin-fade-up loading-block">
-        <el-icon class="is-loading"><Loading /></el-icon>
-        <span>正在加载三表数据…</span>
-      </div>
-
-      <!-- Error -->
-      <div v-else-if="store.error" class="fin-card fin-fade-up error-block">
-        <el-icon class="error-block__icon"><CircleCloseFilled /></el-icon>
-        <p class="error-block__title">{{ store.error }}</p>
-        <el-button size="small" type="primary" plain @click="refresh">重试</el-button>
-      </div>
+      <!-- Loading / Error（M6.01 通用组件） -->
+      <PageLoading v-if="store.loading" class="fin-card fin-fade-up" text="正在加载三表数据…" />
+      <ErrorState
+        v-else-if="store.error"
+        class="fin-card fin-fade-up"
+        :title="store.error"
+        @retry="refresh"
+      />
 
       <!-- 三表 + 勾稽 + 异常 + 报告 Tab -->
       <div v-else class="fin-card fin-fade-up statements-card">
@@ -407,30 +405,6 @@ function onTabChange(name: string): void {
 
 .meta__value--mono {
   font-family: 'SFMono-Regular', Consolas, monospace;
-}
-
-.loading-block,
-.error-block {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 64px 24px;
-}
-
-.loading-block .is-loading {
-  font-size: 32px;
-  color: var(--fin-primary);
-}
-
-.error-block__icon {
-  font-size: 40px;
-  color: var(--fin-danger);
-}
-
-.error-block__title {
-  font-size: 14px;
-  color: var(--fin-text-regular);
 }
 
 .statements-card {

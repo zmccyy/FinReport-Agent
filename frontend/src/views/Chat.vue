@@ -44,6 +44,8 @@ interface ViewMessage {
 }
 
 const sessions = ref<ChatSession[]>([])
+// M6.01：会话列表初次加载态（避免空态闪现「暂无会话」）
+const sessionsLoading = ref(true)
 const activeSessionId = ref<number | null>(null)
 const messages = ref<ViewMessage[]>([])
 const input = ref('')
@@ -91,11 +93,14 @@ const sessionDeleteVisible = ref(false)
 // ---------------------------------------------------------------------------
 
 async function loadSessions(): Promise<void> {
+  sessionsLoading.value = true
   try {
     sessions.value = await listSessions()
   } catch (err) {
     ElMessage.error('会话列表加载失败')
     console.error('[Chat] listSessions failed', err)
+  } finally {
+    sessionsLoading.value = false
   }
 }
 
@@ -386,7 +391,11 @@ onBeforeUnmount(() => {
           <span class="chat__session-name">{{ s.title }}</span>
           <el-icon class="chat__session-del" @click.stop="askDelete(s)"><Delete /></el-icon>
         </div>
-        <p v-if="sessions.length === 0" class="chat__session-empty">暂无会话</p>
+        <p v-if="sessionsLoading" class="chat__session-empty">
+          <el-icon class="is-loading chat__session-loading"><Loading /></el-icon>
+          加载中…
+        </p>
+        <p v-else-if="sessions.length === 0" class="chat__session-empty">暂无会话</p>
       </div>
     </aside>
 
@@ -552,10 +561,18 @@ onBeforeUnmount(() => {
 }
 
 .chat__session-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   font-size: 12px;
   color: var(--fin-text-tertiary);
   text-align: center;
   margin-top: 12px;
+}
+
+.chat__session-loading {
+  font-size: 12px;
 }
 
 /* 主区 */
@@ -594,7 +611,7 @@ onBeforeUnmount(() => {
   overflow-y: auto;
   min-height: 0;
   padding: 18px 20px;
-  background: linear-gradient(180deg, #fafbfc 0%, #fff 16%);
+  background: linear-gradient(180deg, var(--fin-bg) 0%, var(--fin-surface) 16%);
 }
 
 .chat__messages {
@@ -658,7 +675,7 @@ onBeforeUnmount(() => {
   gap: 10px;
   padding: 12px 16px 14px;
   border-top: 1px solid var(--fin-border);
-  background: #fff;
+  background: var(--fin-surface-elevated);
 }
 
 .chat__composer :deep(.el-textarea__inner) {

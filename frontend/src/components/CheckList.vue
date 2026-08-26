@@ -344,7 +344,7 @@ watch(
   line-height: 1.5;
   margin: 0;
   padding: 10px 12px;
-  background: rgba(0, 0, 0, 0.03);
+  background: var(--fin-bg);
   border-radius: var(--fin-radius-xs);
 }
 </style>

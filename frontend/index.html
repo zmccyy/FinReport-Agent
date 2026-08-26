@@ -5,6 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FinReport Agent — 财报深度解析</title>
+    <!-- M6.01 防 FOUC：在 CSS/JS 就绪前预置 html.dark，逻辑与 composables/useTheme.ts 保持一致 -->
+    <script>
+      ;(function () {
+        try {
+          var saved = localStorage.getItem('finreport-theme')
+          var dark = saved === 'dark' || (saved === null && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) document.documentElement.classList.add('dark')
+        } catch (e) {
+          /* localStorage 不可用时保持浅色 */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>
