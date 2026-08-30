@@ -43,6 +43,24 @@ FINISHED_TOO_MANY_TOOL_ERRORS = "too_many_tool_errors"
 FINISHED_PARSE_ERROR = "parse_error"
 FINISHED_GENERATION_ERROR = "generation_error"
 
+# 兜底合成指令（M6.08 评估发现 5：平安 q2 8 次工具调用后放弃，answer 为空）。
+# 步数/错误熔断后追加一轮「仅凭已有 Observation 直接作答」的合成调用，
+# 保证用户永远拿到非空回答；Observation 不足以回答时要求诚实说明而非编造。
+_FALLBACK_DIRECTIVE = (
+    "\n你在此前的 ReAct 过程中已耗尽工具调用机会，未能输出最终回答。"
+    "现在请只依据上面「已执行的步骤」中各 Observation 里的真实数据，"
+    "用一段不超过 200 字的中文正文直接回答最初的用户问题：\n"
+    "1. 只引用 Observation 中出现的数据与结论，禁止编造任何数值；\n"
+    "2. 若 Observation 不足以回答，请明确说明「根据当前可获取的数据暂时无法"
+    "回答该问题」并简述原因（如科目未找到、工具不可用）；\n"
+    "3. 直接输出回答正文，不要输出 JSON、thought、工具调用或任何解释性元话语。"
+)
+# 合成调用也失败时的最终静态兜底（保证非空回答，含终止原因供排查）。
+_FALLBACK_STATIC = (
+    "抱歉，本次问答未能生成有效回答（{reason}）。请稍后重试，"
+    "或换一种问法（如指定报表类型与期间）。"
+)
+
 
 @dataclass(frozen=True)
 class AgentStep:
@@ -84,6 +102,7 @@ class AgentOrchestrator:
         temperature: float = 0.3,
         max_new_tokens: int = 4096,
         timeout_seconds: float | None = None,
+        unit_hint: str = "",
     ) -> None:
         """Configure the orchestrator.
 
@@ -95,6 +114,8 @@ class AgentOrchestrator:
             temperature: ReAct 采样温度（多步探索需要少量随机性）。
             max_new_tokens: 单步输出上限（每步仅一个 JSON，4096 足够）。
             timeout_seconds: 单步生成超时（None 用后端默认）。
+            unit_hint: 报表数值单位（如「百万元」）；非空时 system prompt
+                注入金额单位铁律（M6.08 评估发现 3）。
         """
         self.hub = hub
         self.registry = registry
@@ -103,7 +124,7 @@ class AgentOrchestrator:
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
         self.timeout_seconds = timeout_seconds
-        self._system_prompt = build_system_prompt(registry.specs())
+        self._system_prompt = build_system_prompt(registry.specs(), unit_hint=unit_hint)
 
     def run(
         self,
@@ -138,6 +159,40 @@ class AgentOrchestrator:
         prompt_extra = ""
         known_tools = self.registry.known_tools()
 
+        def finish(
+            finished_reason: str,
+            *,
+            total_steps: int,
+            error: str,
+        ) -> AgentResult:
+            """非 final_answer 终止的统一出口：先做兜底合成再返回。
+
+            兜底合成（M6.08 评估发现 5）：把已收集的 Observation 交给 LLM
+            直接作答，失败则回退静态提示文案；任何情况下 answer 非空，
+            ``finished_reason`` 保留真实终止原因供前端/评估观测。
+            """
+            return self._synthesize_fallback(
+                question,
+                history=[
+                    {
+                        "thought": step.thought,
+                        "action": step.action,
+                        "observation": step.observation,
+                    }
+                    for step in transcript
+                ],
+                steps=transcript,
+                company_context=company_context,
+                conversation=conversation,
+                summary=summary,
+                prompt_extra=prompt_extra,
+                finished_reason=finished_reason,
+                tool_errors=tool_errors,
+                parse_errors=parse_errors,
+                total_steps=total_steps,
+                error=error,
+            )
+
         while steps_done < self.max_steps:
             history = [
                 {
@@ -168,11 +223,8 @@ class AgentOrchestrator:
                 )
             except Exception as error:
                 LOGGER.exception("[AgentOrchestrator] 生成失败 step=%d", steps_done)
-                return AgentResult(
-                    finished_reason=FINISHED_GENERATION_ERROR,
-                    steps=transcript,
-                    tool_errors=tool_errors,
-                    parse_errors=parse_errors,
+                return finish(
+                    FINISHED_GENERATION_ERROR,
                     total_steps=steps_done,
                     error=f"{type(error).__name__}: {error}",
                 )
@@ -183,11 +235,8 @@ class AgentOrchestrator:
             except ReactParseError as error:
                 parse_errors += 1
                 if parse_errors >= MAX_PARSE_ERRORS:
-                    return AgentResult(
-                        finished_reason=FINISHED_PARSE_ERROR,
-                        steps=transcript,
-                        tool_errors=tool_errors,
-                        parse_errors=parse_errors,
+                    return finish(
+                        FINISHED_PARSE_ERROR,
                         total_steps=steps_done,
                         error=f"连续 {parse_errors} 次输出解析失败: {error}",
                     )
@@ -242,22 +291,109 @@ class AgentOrchestrator:
             if not result.get("ok"):
                 tool_errors += 1
                 if tool_errors >= self.max_tool_errors:
-                    return AgentResult(
-                        finished_reason=FINISHED_TOO_MANY_TOOL_ERRORS,
-                        steps=transcript,
-                        tool_errors=tool_errors,
-                        parse_errors=parse_errors,
+                    return finish(
+                        FINISHED_TOO_MANY_TOOL_ERRORS,
                         total_steps=steps_done,
                         error=f"连续 {tool_errors} 次工具报错",
                     )
 
-        return AgentResult(
-            finished_reason=FINISHED_MAX_STEPS,
-            steps=transcript,
-            tool_errors=tool_errors,
-            parse_errors=parse_errors,
+        return finish(
+            FINISHED_MAX_STEPS,
             total_steps=steps_done,
             error=f"达到步数上限 {self.max_steps}",
+        )
+
+    def _synthesize_fallback(
+        self,
+        question: str,
+        *,
+        history: list[dict[str, str]],
+        steps: list[AgentStep],
+        company_context: str,
+        conversation: list[dict[str, str]] | None,
+        summary: str,
+        prompt_extra: str,
+        finished_reason: str,
+        tool_errors: int,
+        parse_errors: int,
+        total_steps: int,
+        error: str,
+    ) -> AgentResult:
+        """熔断/异常终止后的兜底回答（M6.08 评估发现 5）。
+
+        追加一轮「仅凭已有 Observation 直接作答」的合成调用（关闭 json_mode，
+        输出纯文本正文）；合成调用自身失败（hub 异常/空输出）时回退静态
+        提示文案。任何分支都保证 ``answer`` 非空。
+
+        Args:
+            question: 用户问题（与 run 入参一致）。
+            history: 已执行步骤（thought/action/observation，prompt 组装用）。
+            steps: 已执行步骤对象（结果透传，transcript 展示用）。
+            company_context / conversation / summary / prompt_extra: 与主循环
+                相同的 prompt 组装参数。
+            finished_reason: 真实终止原因（保留在结果中，不因兜底改写）。
+            tool_errors / parse_errors / total_steps / error: 计数与异常描述。
+
+        Returns:
+            ``AgentResult``（answer 非空，finished_reason 为真实终止原因）。
+        """
+        prompt = (
+            build_react_prompt(
+                question,
+                history,
+                company_context=company_context,
+                conversation=conversation,
+                summary=summary,
+            )
+            + prompt_extra
+            + _FALLBACK_DIRECTIVE
+        )
+        static = _FALLBACK_STATIC.format(
+            reason=error or f"ReAct 终止：{finished_reason}"
+        )
+        try:
+            generation = self.hub.generate(
+                prompt,
+                system_prompt=self._system_prompt,
+                json_mode=False,
+                temperature=self.temperature,
+                max_new_tokens=self.max_new_tokens,
+                timeout_seconds=self.timeout_seconds,
+            )
+        except Exception as fallback_error:  # noqa: BLE001 — 兜底路径吞异常
+            LOGGER.warning(
+                "[AgentOrchestrator] 兜底合成调用失败 reason=%s error=%s",
+                finished_reason,
+                fallback_error,
+            )
+            return AgentResult(
+                answer=static,
+                finished_reason=finished_reason,
+                steps=steps,
+                tool_errors=tool_errors,
+                parse_errors=parse_errors,
+                total_steps=total_steps,
+                error=error,
+            )
+        answer = (generation.text or "").strip()
+        if not answer:
+            LOGGER.warning(
+                "[AgentOrchestrator] 兜底合成为空输出 reason=%s", finished_reason
+            )
+            answer = static
+        LOGGER.info(
+            "[AgentOrchestrator] 兜底回答已生成 reason=%s chars=%d",
+            finished_reason,
+            len(answer),
+        )
+        return AgentResult(
+            answer=answer,
+            finished_reason=finished_reason,
+            steps=steps,
+            tool_errors=tool_errors,
+            parse_errors=parse_errors,
+            total_steps=total_steps,
+            error=error,
         )
 
     def _execute_tool(self, parsed: ToolCall) -> dict[str, Any]:

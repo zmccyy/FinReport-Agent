@@ -55,13 +55,26 @@ def get_orchestrator_factory() -> Callable[[int], AgentOrchestrator]:
     ``app.dependency_overrides`` 替换本工厂。
 
     Returns:
-        ``report_id -> AgentOrchestrator`` 工厂（registry 绑定该报表）。
+        ``report_id -> AgentOrchestrator`` 工厂（registry 绑定该报表，
+        system prompt 携带报表数值单位提示）。
     """
     settings = Settings()
     hub = get_modelhub()
     reader = ReadOnlyMySqlClient(settings)
 
     def build(report_id: int) -> AgentOrchestrator:
+        # 报表元数据一次查询复用（M6.08 评估发现 2/3）：company_code 作
+        # search_kb 检索过滤键，unit 注入 system prompt 金额单位铁律；
+        # 查询失败降级为不过滤/无单位提示，不阻断问答。
+        data = None
+        try:
+            data = reader.fetch_report_statements_by_report_id(report_id)
+        except Exception:  # noqa: BLE001 — 上下文增强失败不阻断问答
+            LOGGER.warning(
+                "[chat/stream] 报表元数据查询失败 reportId=%s",
+                report_id,
+                exc_info=True,
+            )
         registry = build_default_registry(
             reader,
             report_id,
@@ -70,8 +83,11 @@ def get_orchestrator_factory() -> Callable[[int], AgentOrchestrator]:
             embedder=hub,
             milvus_host=settings.milvus_host,
             milvus_port=settings.milvus_port,
+            company_code=data.company_code if data is not None else "",
         )
-        return AgentOrchestrator(hub, registry)
+        return AgentOrchestrator(
+            hub, registry, unit_hint=data.unit if data is not None else ""
+        )
 
     return build
 
@@ -137,8 +153,19 @@ async def stream_chat(
                     break
                 yield _render_step_event(event, tools_used)
             result = await task
-            if result.success:
-                for chunk in _chunk_answer(result.answer or ""):
+            if result.answer:
+                # 兜底回答（M6.08 评估发现 5）：ReAct 熔断/异常终止时
+                # orchestrator 也会合成非空回答，与 final_answer 同走
+                # token/done 事件；真实终止原因经 finishedReason/error 透出。
+                if not result.success:
+                    LOGGER.warning(
+                        "[chat/stream] ReAct 未正常结束（已兜底回答）"
+                        " sessionId=%s reason=%s error=%s",
+                        request.session_id,
+                        result.finished_reason,
+                        result.error,
+                    )
+                for chunk in _chunk_answer(result.answer):
                     token_count += 1
                     yield build_chat_event("token", {"content": chunk})
                 yield build_chat_event(
@@ -148,12 +175,12 @@ async def stream_chat(
                         "tokenCount": token_count,
                         "toolsUsed": tools_used,
                         "finishedReason": result.finished_reason,
-                        "error": "",
+                        "error": result.error or "",
                     },
                 )
             else:
                 LOGGER.warning(
-                    "[chat/stream] ReAct 未正常结束 sessionId=%s reason=%s error=%s",
+                    "[chat/stream] ReAct 无回答终止 sessionId=%s reason=%s error=%s",
                     request.session_id,
                     result.finished_reason,
                     result.error,

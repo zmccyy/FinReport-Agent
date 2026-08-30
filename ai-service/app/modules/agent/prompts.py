@@ -18,11 +18,16 @@ from typing import Any
 MAX_OBSERVATION_CHARS = 1200
 
 
-def build_system_prompt(tool_specs: list[dict[str, Any]]) -> str:
+def build_system_prompt(
+    tool_specs: list[dict[str, Any]], *, unit_hint: str = ""
+) -> str:
     """渲染 ReAct system prompt（含工具 JSON Schema）。
 
     Args:
         tool_specs: ``ToolRegistry.specs()`` 输出（name/description/parameters）。
+        unit_hint: 报表数值单位提示（如「百万元」）；非空时追加金额单位铁律
+            （M6.08 评估发现 3：单位未随 statement.unit 传递，百万元/千元被
+            写作元/万元造成数量级错误）。
 
     Returns:
         System prompt 文本。
@@ -32,6 +37,13 @@ def build_system_prompt(tool_specs: list[dict[str, Any]]) -> str:
         f"  JSON Schema: {_compact_json(spec['parameters'])}"
         for spec in tool_specs
     )
+    unit_rule = ""
+    if unit_hint:
+        unit_rule = (
+            f"6. 金额单位铁律：本报表所有数值的单位是「{unit_hint}」。回答金额时"
+            f"必须以「{unit_hint}」表述（或用 unit_convert 换算后同时保留原单位数值），"
+            "禁止把数值改写成元/万元/亿元等其它单位而不做换算。\n"
+        )
     return (
         "你是一名专业的 A 股财报问答助手，使用 ReAct（思考-行动-观察）方式回答"
         "用户关于财务报表的问题。\n"
@@ -45,7 +57,8 @@ def build_system_prompt(tool_specs: list[dict[str, Any]]) -> str:
         "3. tool 必须是上面清单中的名字；arguments 必须符合该工具的 JSON Schema。\n"
         "4. 得到足够信息后立即输出 final_answer；回答中引用数据时注明来源。\n"
         "5. 工具返回 data 为 null 或 reason 说明不可计算时，换一种方式或直接基于"
-        "已有信息回答，不要反复调用同一工具。"
+        "已有信息回答，不要反复调用同一工具。\n"
+        f"{unit_rule}"
     )
 
 

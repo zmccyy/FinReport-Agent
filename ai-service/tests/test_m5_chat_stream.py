@@ -25,14 +25,25 @@ from app.modules.agent.tool_registry import ToolRegistry, ToolSpec
 
 
 class ScriptedHub:
-    """脚本化 ModelHub：按序返回预设输出；耗尽后报错。"""
+    """脚本化 ModelHub：按序返回预设输出；耗尽后报错。
 
-    def __init__(self, outputs: list[str]) -> None:
+    ``fallback_answer`` 非空时，脚本耗尽后的调用（即 M6.08 兜底合成轮）
+    返回该文本而非抛错，并记录合成调用的 prompt 与 kwargs 供断言。
+    """
+
+    def __init__(self, outputs: list[str], fallback_answer: str = "") -> None:
         self.outputs = outputs
         self.generation = SimpleNamespace(text="")
+        self.fallback_answer = fallback_answer
+        self.fallback_prompt = ""
+        self.last_generate_kwargs: dict[str, Any] = {}
 
     def generate(self, prompt: str, **kwargs: Any) -> SimpleNamespace:
+        self.last_generate_kwargs = kwargs
         if not self.outputs:
+            if self.fallback_answer:
+                self.fallback_prompt = prompt
+                return SimpleNamespace(text=self.fallback_answer)
             raise RuntimeError("script exhausted")
         return SimpleNamespace(text=self.outputs.pop(0))
 
@@ -183,28 +194,53 @@ def test_stream_long_answer_chunked_into_tokens() -> None:
     assert "".join(tokens) == answer
 
 
-def test_stream_react_failure_emits_error_event() -> None:
-    """ReAct 未正常结束（步数上限）→ error 事件携带原因。"""
+def test_stream_react_failure_falls_back_to_answer() -> None:
+    """ReAct 达到步数上限 → 兜底合成回答经 token/done 下发（M6.08 发现 5）。
+
+    脚本耗尽使兜底合成调用本身失败，回退静态提示文案——但 answer 仍非空，
+    事件以 done（finishedReason=max_steps）终结而非 error。
+    """
     hub = ScriptedHub([_tool_output()] * 8)
     response = _post_stream(_client(hub))
 
     events = _parse_events(response)
-    assert events[-1]["event"] == "error"
-    assert events[-1]["data"]["code"] == "CHAT_FAILED"
-    assert events[-1]["data"]["finishedReason"] == FINISHED_MAX_STEPS
+    assert events[-1]["event"] == "done"
+    done = events[-1]["data"]
+    assert done["finishedReason"] == FINISHED_MAX_STEPS
+    assert done["error"] != ""
+    answer = "".join(e["data"]["content"] for e in events if e["event"] == "token")
+    assert answer.strip() != ""
     # error 前仍把可见的 thought/tool_call/tool_result 事件流出了
     assert any(e["event"] == "thought" for e in events)
 
 
-def test_stream_generation_error_emits_error_event() -> None:
-    """LLM 生成阶段异常（脚本耗尽）→ error 事件，不挂断连接。"""
+def test_stream_react_failure_synthesizes_from_observations() -> None:
+    """熔断后兜底合成成功：合成调用收到「仅凭 Observation 作答」指令。"""
+    hub = ScriptedHub(
+        [_tool_output()] * 8, fallback_answer="根据查询结果，货币资金为 100 元。"
+    )
+    response = _post_stream(_client(hub))
+
+    events = _parse_events(response)
+    assert events[-1]["event"] == "done"
+    answer = "".join(e["data"]["content"] for e in events if e["event"] == "token")
+    assert answer == "根据查询结果，货币资金为 100 元。"
+    # 合成调用关闭 json_mode（纯文本输出）
+    assert hub.last_generate_kwargs.get("json_mode") is False
+    assert "Observation" in hub.fallback_prompt
+
+
+def test_stream_generation_error_emits_fallback_answer() -> None:
+    """LLM 生成阶段异常（脚本耗尽）→ 静态兜底回答 + done，不挂断连接。"""
     hub = ScriptedHub([])
     response = _post_stream(_client(hub))
 
     events = _parse_events(response)
-    assert events[-1]["event"] == "error"
-    assert events[-1]["data"]["code"] == "CHAT_FAILED"
-    assert "RuntimeError" in events[-1]["data"]["message"]
+    assert events[-1]["event"] == "done"
+    done = events[-1]["data"]
+    assert done["finishedReason"] == "generation_error"
+    answer = "".join(e["data"]["content"] for e in events if e["event"] == "token")
+    assert "抱歉" in answer and answer.strip() != ""
 
 
 def test_stream_rejects_missing_report_id() -> None:

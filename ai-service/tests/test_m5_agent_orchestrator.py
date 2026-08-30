@@ -17,16 +17,25 @@ from app.modules.agent.tool_registry import ToolRegistry, ToolSpec
 
 
 class ScriptedHub:
-    """脚本化 ModelHub：按序返回预设输出；耗尽后报错。"""
+    """脚本化 ModelHub：按序返回预设输出；耗尽后报错。
 
-    def __init__(self, outputs: list[str]) -> None:
+    ``fallback_answer`` 非空时，脚本耗尽后的调用（即 M6.08 兜底合成轮）
+    返回该文本而非抛错，并记录该调用供断言。
+    """
+
+    def __init__(self, outputs: list[str], fallback_answer: str = "") -> None:
         self.outputs = outputs
         self.calls: list[dict] = []
         self.generation = SimpleNamespace(text="")
+        self.fallback_answer = fallback_answer
+        self.fallback_prompt = ""
 
     def generate(self, prompt: str, **kwargs: Any) -> SimpleNamespace:
         self.calls.append({"prompt": prompt, **kwargs})
         if not self.outputs:
+            if self.fallback_answer:
+                self.fallback_prompt = prompt
+                return SimpleNamespace(text=self.fallback_answer)
             raise RuntimeError("script exhausted")
         text = self.outputs.pop(0)
         return SimpleNamespace(text=text)
@@ -72,7 +81,9 @@ def _tool_output(thought: str = "思考") -> str:
 
 
 def _final_output(answer: str = "最终答案") -> str:
-    return json.dumps({"thought": "思考完毕", "final_answer": answer}, ensure_ascii=False)
+    return json.dumps(
+        {"thought": "思考完毕", "final_answer": answer}, ensure_ascii=False
+    )
 
 
 def test_single_tool_then_final_answer() -> None:
@@ -100,22 +111,41 @@ def test_direct_final_answer_no_tool() -> None:
 
 
 def test_tool_error_three_times_terminates() -> None:
-    """工具连续报错 3 次终止（spec M9 终止条件）。"""
-    hub = ScriptedHub([_tool_output()] * 3 + [_final_output()])
+    """工具连续报错 3 次终止（spec M9 终止条件），兜底合成保证非空回答。"""
+    hub = ScriptedHub(
+        [_tool_output()] * 3, fallback_answer="根据已获取信息无法回答该问题。"
+    )
     result = AgentOrchestrator(hub, _make_registry(fail_times=99)).run("问题")
     assert result.success is False
     assert result.finished_reason == FINISHED_TOO_MANY_TOOL_ERRORS
     assert result.tool_errors == 3
     assert result.error == "连续 3 次工具报错"
+    # 兜底合成：answer 非空、保留真实终止原因、关闭 json_mode
+    assert result.answer == "根据已获取信息无法回答该问题。"
+    assert "Observation" in hub.fallback_prompt
+    assert hub.calls[-1]["json_mode"] is False
+
+
+def test_tool_error_synthesis_failure_returns_static_answer() -> None:
+    """兜底合成调用自身失败 → 静态提示文案兜底（answer 仍非空）。"""
+    hub = ScriptedHub([_tool_output()] * 3)
+    result = AgentOrchestrator(hub, _make_registry(fail_times=99)).run("问题")
+    assert result.success is False
+    assert result.finished_reason == FINISHED_TOO_MANY_TOOL_ERRORS
+    assert "抱歉" in (result.answer or "")
+    assert "连续 3 次工具报错" in (result.answer or "")
 
 
 def test_max_steps_terminates() -> None:
-    """步数上限 8 终止（只输出工具调用）。"""
-    hub = ScriptedHub([_tool_output()] * 8)
+    """步数上限 8 终止（只输出工具调用），兜底合成保证非空回答。"""
+    hub = ScriptedHub(
+        [_tool_output()] * 8, fallback_answer="货币资金为 100 元（来自查询结果）。"
+    )
     result = AgentOrchestrator(hub, _make_registry()).run("问题")
     assert result.success is False
     assert result.finished_reason == FINISHED_MAX_STEPS
     assert result.total_steps == 8
+    assert result.answer == "货币资金为 100 元（来自查询结果）。"
 
 
 def test_parse_error_recovers_with_retry_hint() -> None:
@@ -160,7 +190,9 @@ def test_missing_required_argument_counts_as_tool_error() -> None:
     """参数校验失败（缺必填）→ ok=False → 计入工具报错。"""
     missing = json.dumps({"thought": "x", "tool": "demo_tool", "arguments": {}})
     hub = ScriptedHub([missing, missing, missing])
-    result = AgentOrchestrator(hub, _make_registry(schema_required=["item"])).run("问题")
+    result = AgentOrchestrator(hub, _make_registry(schema_required=["item"])).run(
+        "问题"
+    )
     assert result.success is False
     assert result.finished_reason == FINISHED_TOO_MANY_TOOL_ERRORS
     assert result.tool_errors == 3
