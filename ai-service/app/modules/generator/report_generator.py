@@ -55,7 +55,10 @@ _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 _OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 # 报告生成默认参数（spec §3.7 SLA：REPORT 链路 45s 超时）。
-_DEFAULT_MAX_NEW_TOKENS = 2048  # 5 段报告较长，需要较大 token 预算
+# M6.08：2048 → 8192。LLM_API_MODEL 为推理型模型（deepseek-v4-flash），
+# reasoning 计入 max_tokens，2048 连 reasoning 都不够（finish_reason=length、
+# content 空 → 降级模板报告，M6.08 首跑实测）；仍在 model_max_new_tokens=16384 内。
+_DEFAULT_MAX_NEW_TOKENS = 8192  # 5 段报告较长，需要较大 token 预算
 _DEFAULT_TEMPERATURE = 0.3  # 报告需自然语言，温度略高避免死板；但仍偏低避免幻觉
 _DEFAULT_TIMEOUT_SECONDS = 45.0
 

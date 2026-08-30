@@ -30,8 +30,12 @@ DEFAULT_RENDER_DPI = 200
 
 # A 股年报报表页锚点：合并/母公司 三表标题（M4.10）。
 _STATEMENT_ANCHOR_RE = re.compile(r"(合并|母公司)(资产负债表|利润表|现金流量表)")
-# 金额格式（千分位 + 两位小数），用于报表页密度门控。
-_AMOUNT_CELL_RE = re.compile(r"\d{1,3}(?:,\d{3})+\.\d{2}")
+# 金额格式（千分位，小数可选），用于报表页密度门控。M6.08：原
+# `\.\d{2}` 强制两位小数——茅台（元，两位小数）能过门控，但平安
+# （百万元整数）与宁德（千元整数）的报表页密度恒为 0，报表页被
+# 静默跳过，抽取因「no X table found」重试耗尽。去小数强制，
+# 保留千分位特征。
+_AMOUNT_CELL_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?")
 
 
 class StatementPageFilter:

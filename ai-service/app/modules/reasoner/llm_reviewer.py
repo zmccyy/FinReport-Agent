@@ -52,7 +52,8 @@ _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 _OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 # 复核 prompt 默认参数（spec §3.7 SLA：REASON 链路 60s 超时）。
-_DEFAULT_MAX_NEW_TOKENS = 512
+# M6.08：512 → 4096。推理型模型 reasoning 计入 max_tokens（同 report_generator）。
+_DEFAULT_MAX_NEW_TOKENS = 4096
 _DEFAULT_TEMPERATURE = 0.1  # 复核需稳定推理，低温但允许少量采样避免死循环
 _DEFAULT_TIMEOUT_SECONDS = 60.0
 

@@ -39,7 +39,9 @@ QUANT_API = "api"
 # 且 400 不在可重试状态集——默认 ``model_max_new_tokens=16384``（按
 # reasoning 模型调优）配上 compose 默认 ``deepseek-chat``（上限 8192）
 # 会使每次 generate 都 400，三步抽取全部 FAILED 且无重试。
-_MODEL_MAX_TOKENS_CAPS: dict[str, int] = {"deepseek-chat": 8192}
+# M6.08：deepseek-v4-flash 实测接受 32768（reasoning 计入 max_tokens，
+# 银行年报大表抽取需更大预算，见 deploy/docker-compose.yml MODEL_MAX_NEW_TOKENS）。
+_MODEL_MAX_TOKENS_CAPS: dict[str, int] = {"deepseek-chat": 8192, "deepseek-v4-flash": 32768}
 
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 

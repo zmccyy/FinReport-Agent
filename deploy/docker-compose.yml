@@ -224,6 +224,10 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_API_BASE_URL: ${LLM_API_BASE_URL:-https://api.deepseek.com}
       LLM_API_MODEL: ${LLM_API_MODEL:-deepseek-chat}
+      # M6.08：抽取 token 预算（config 默认 16384）。推理型模型（deepseek-v4-flash）
+      # 的 reasoning 计入 max_tokens，银行年报大表抽取时 reasoning 可耗尽预算致
+      # content 为空（实测 EXTRACT_CF 重试耗尽）；API 实测接受 32768。
+      MODEL_MAX_NEW_TOKENS: ${MODEL_MAX_NEW_TOKENS:-32768}
       # 本地 embedding 模型（bge-small-zh-v1.5，挂载于 models 卷，M4.07/M4.09）
       MODEL_EMBED_PATH: /models/bge-small-zh-v1.5
       # M4.10 表格识别页面渲染 DPI（默认 200；内存受限环境可降 150，

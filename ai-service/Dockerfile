@@ -106,7 +106,13 @@ WORKDIR /app
 RUN if [ -n "$APT_MIRROR" ]; then \
         sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
     fi \
-    && apt-get update && apt-get install -y --no-install-recommends curl \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libgl1 \
+    libglib2.0-0t64 \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    fonts-wqy-zenhei \
     && rm -rf /var/lib/apt/lists/*
 
 # Install only dev extras + lightweight clients. Heavy prod dependencies
@@ -126,13 +132,22 @@ COPY pyproject.toml .
 COPY app/ ./app/
 # M5.09：dev 镜像补装 torch（CPU）+ sentence-transformers。知识库问答
 # （search_kb → ModelHub.embed → BgeSmallEmbedder）是 M5 验收能力，dev
-# 环境必须可跑；其余重量级 prod 依赖（paddle/weasyprint/matplotlib）仍
-# 保持惰性 import、不装，控制 dev 镜像体积。
+# 环境必须可跑。
+# M6.08：补装 MQ 管线验收必需依赖——pika（消费者线程启动即 import，缺失
+# 则线程静默死亡、全链路卡死 PARSE_RUNNING）、pymupdf（PARSE 硬依赖）、
+# weasyprint/matplotlib/pillow（REPORT 产物五类 GENERATED 硬门槛）+
+# pango/中文字体系统库；paddlepaddle/paddleocr 全组（paddlex 强制校验
+# ocr extra 依赖集，缺任一包构造即 DependencyError，M4.10 注）——PARSE
+# 的 PP-Structure 表格还原是抽取质量（F1 ≥ 0.85）的前提，dev 缺 paddle
+# 时每页 Layout analyzer failed → 抽取输入残缺（实测 F1 0.29）。
 RUN if [ -n "$PIP_INDEX_URL" ]; then export PIP_INDEX_URL; fi \
     && pip install --no-cache-dir --retries 5 --timeout 120 \
         ${TORCH_SPEC} ${TORCH_INSTALL_ARGS} \
-    && pip install --no-cache-dir -e ".[dev]" minio pymilvus python-multipart pymysql \
-    && pip install --no-cache-dir --retries 5 --timeout 120 sentence-transformers
+    && pip install --no-cache-dir -e ".[dev]" pika pymupdf weasyprint matplotlib pillow \
+        minio pymilvus python-multipart pymysql \
+    && pip install --no-cache-dir --retries 5 --timeout 120 sentence-transformers \
+        paddlepaddle paddleocr \
+        beautifulsoup4 einops ftfy latex2mathml lxml openpyxl premailer sentencepiece tiktoken
 
 EXPOSE 8000
 

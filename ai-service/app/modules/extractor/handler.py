@@ -38,6 +38,12 @@ from app.utils.logger import get_logger
 
 LOGGER = get_logger(__name__)
 
+# 目录页甄别（M6.08）：金额单元密度阈值——千分位数字（与
+# document_parser._AMOUNT_CELL_RE 同口径）少于该值的标题命中页视为
+# 目录/封面页，不作报表段起点。
+_AMOUNT_CELL_RE = re.compile(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?")
+_TOC_DENSITY_MIN = 3
+
 # step name → L3 StatementType.value（L2 锁定同一组字符串值）。
 _STEP_TO_TYPE = {
     "extract.bs": "balance_sheet",
@@ -88,10 +94,16 @@ _PARENT_TITLES: dict[str, str] = {
     "income_statement": "母公司利润表",
     "cash_flow": "母公司现金流量表",
 }
-# 全部六类报表标题（H1 隐式边界）：当前报表的合并标题之外，段内出现
+# 全部报表标题（H1 隐式边界）：当前报表的合并标题之外，段内出现
 # 任一其它标题（正常文档序中即当前报表的母公司标题；缺失时为下一张
 # 报表的合并/母公司标题）即视为段终止，防止把全文档尾并入合并段。
-_ALL_TITLES: tuple[str, ...] = (*_MERGED_TITLES.values(), *_PARENT_TITLES.values())
+# M6.08 追加银行年报变体：银行年报的母公司段标题为「银行…」而非
+# 「母公司…」（平安银行实测）——缺失时 BS 段会越过银行表吞到下一张
+# 合并报表，把银行口径表格并入合并段。
+_BANK_TITLES: tuple[str, ...] = ("银行资产负债表", "银行利润表", "银行现金流量表")
+_ALL_TITLES: tuple[str, ...] = (
+    *_MERGED_TITLES.values(), *_PARENT_TITLES.values(), *_BANK_TITLES,
+)
 # H1 兜底：无任何终止标题时按关键词密度收窄段尾的硬上限（起始页之后
 # 允许的最大跨页数；三表实际跨度 2-4 页，7 页留余量并约束 prompt 体积）。
 _MAX_SEGMENT_SPAN = 7
@@ -294,15 +306,29 @@ def select_table(
     keywords = _TABLE_KEYWORDS[statement_type.value]
     merged_title = _MERGED_TITLES[statement_type.value]
 
-    # 段开始页：合并标题所在页。
+    # 段开始页：合并标题所在页。M6.08：跳过目录页——银行年报目录页的
+    # 标题是干净独立文本块（平安实测），会被 _title_y0 命中并把段起点
+    # 锚到目录页（目录段无表格 → select_table 返回 None）；以金额单元
+    # 密度（千分位数字，与 document_parser._AMOUNT_CELL_RE 同口径）区分
+    # 目录页与真实报表页，无密度命中页时回退首个命中（保持旧行为）。
     start_page: Page | None = None
     start_title_y0 = 0.0
+    first_hit: tuple[Page, float] | None = None
     for page in document.pages:
         y0 = _title_y0(page, merged_title)
-        if y0 is not None:
+        if y0 is None:
+            continue
+        if first_hit is None:
+            first_hit = (page, y0)
+        amount_cells = sum(
+            len(_AMOUNT_CELL_RE.findall(block.text)) for block in page.text_blocks
+        )
+        if amount_cells >= _TOC_DENSITY_MIN:
             start_page = page
             start_title_y0 = y0
             break
+    if start_page is None and first_hit is not None:
+        start_page, start_title_y0 = first_hit
     if start_page is None:
         LOGGER.warning("[select_table] %s 未找到合并标题段", merged_title)
         return None
