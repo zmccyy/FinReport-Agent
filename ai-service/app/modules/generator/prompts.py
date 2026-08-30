@@ -40,6 +40,10 @@ _SYSTEM_PROMPT = (
     "异常与风险、结论；每段的 content 字段用 Markdown 正文撰写，"
     "必须引用真实数据（数值、科目名、规则结果、异常描述），不要编造。"
     "content 不要嵌套 JSON、不要使用代码块；可以适当使用列表与加粗。"
+    "金额单位铁律：所有数据的数值单位以「数值单位」字段为准（如百万元/千元/元），"
+    "引用数值时必须标注该单位，禁止凭空改写成元/万元/亿元等其它单位；"
+    "如需换算为亿元等更大单位便于阅读，必须按给定单位准确换算，并同时保留"
+    "原单位数值（如「5,925,777 百万元（约 5,925.78 亿元）」），换算错误比不换算更严重。"
 )
 
 _OUTPUT_SCHEMA_HINT = """{
@@ -105,13 +109,14 @@ def build_report_prompt(
         [
             f"报告期末日：{statement.report_period}",
             f"币种：{statement.currency}",
-            f"数值单位：{statement.unit}",
+            f"数值单位：{statement.unit}（下方三表与勾稽差异的所有数值均为此单位）",
             f"勾稽置信度：{check_result.confidence:.2f}",
         ]
     )
     header = "\n".join(header_lines)
 
-    # 三表上下文（每表前 N 个科目）。
+    # 三表上下文（每表前 N 个科目）。表级标注单位（M6.08 评估发现 3：
+    # 金额单位未随 statement.unit 传递，百万元/千元被 LLM 写作元/万元）。
     context_lines: list[str] = []
     for st_type in (
         StatementType.BALANCE_SHEET,
@@ -124,9 +129,10 @@ def build_report_prompt(
         label = _STATEMENT_LABELS.get(st_type, st_type.value)
         sample = items[:_MAX_STATEMENT_ITEMS_PER_TABLE]
         formatted = ", ".join(
-            f"{item.item}={_fmt_decimal(Decimal(str(item.value)))}" for item in sample
+            f"{item.item}={_fmt_decimal(Decimal(str(item.value)))}{statement.unit}"
+            for item in sample
         )
-        context_lines.append(f"  {label}: {formatted}")
+        context_lines.append(f"  {label}（单位：{statement.unit}）: {formatted}")
     context_block = "\n".join(context_lines) if context_lines else "  (无科目数据)"
 
     # 勾稽规则结果摘要。

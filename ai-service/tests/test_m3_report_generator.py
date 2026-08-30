@@ -1037,11 +1037,12 @@ class TestReportResultHelpers:
 class TestDefaultsAndEdgeCases:
     """默认参数与边界测试。"""
 
-    def test_default_max_new_tokens_is_2048(self) -> None:
-        """默认 max_new_tokens 应为 2048（5 段报告较长）。"""
+    def test_default_max_new_tokens_is_8192(self) -> None:
+        """默认 max_new_tokens 应为 8192（M6.08 D7：推理模型 reasoning
+        计入预算，2048 连 reasoning 都不够会降级模板报告）。"""
         hub = _StubHub(response_text=_valid_llm_response())
         gen = ReportGenerator(hub)
-        assert gen.max_new_tokens == 2048
+        assert gen.max_new_tokens == 8192
 
     def test_default_temperature_is_0_3(self) -> None:
         """默认 temperature 应为 0.3（自然语言但偏低避免幻觉）。"""

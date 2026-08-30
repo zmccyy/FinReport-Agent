@@ -406,10 +406,10 @@ def _build_fallback_report(
         content="\n\n".join(overview_lines),
     )
 
-    # 2. 财务概览（关键科目摘要）
-    financial_lines: list[str] = ["**关键财务指标摘要**："]
+    # 2. 财务概览（关键科目摘要）。
+    financial_lines: list[str] = [f"**关键财务指标摘要**（单位：{statement.unit}）："]
     for label, value in _summarize_key_metrics(statement).items():
-        financial_lines.append(f"- {label}：{value}")
+        financial_lines.append(f"- {label}：{value} {statement.unit}")
     financial_lines.append(
         f"\n**勾稽置信度**：{check_result.confidence:.2f}（1.0 = 全部规则通过 + 无异常）"
     )
@@ -430,7 +430,7 @@ def _build_fallback_report(
         if not items:
             continue
         label = _STATEMENT_LABELS.get(st_type, st_type.value)
-        statement_lines.append(f"\n### {label}")
+        statement_lines.append(f"\n### {label}（单位：{statement.unit}）")
         statement_lines.append("| 科目 | 数值 |")
         statement_lines.append("|---|---|")
         for item in items[:10]:  # 每表最多 10 行避免报告过长
@@ -475,7 +475,9 @@ def _build_fallback_report(
     # 5. 结论
     conclusion_lines: list[str] = []
     if check_result.all_pass:
-        conclusion_lines.append("本期财报勾稽规则全部通过、未检出异常，整体财务数据一致性良好。")
+        conclusion_lines.append(
+            "本期财报勾稽规则全部通过、未检出异常，整体财务数据一致性良好。"
+        )
     else:
         failed = sum(1 for r in check_result.rules if not r.is_pass)
         conclusion_lines.append(

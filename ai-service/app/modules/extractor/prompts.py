@@ -27,9 +27,12 @@ _SYSTEM_PROMPT = (
     "你是一名专业的A股财报分析助手。任务是从给定的财务报表 HTML 中抽取结构化"
     "科目数据，严格输出 JSON 对象，禁止输出任何额外文字、Markdown 代码块或解释。"
     "数值字段必须是数字（不要带千分位逗号、单位或括号）；负数用负号表示。"
+    "符号约定：财报表格中以括号包裹的数值（如 (1,234.56) 或（987））表示负数，"
+    "value 必须输出为对应的负数（-1234.56、-987），禁止丢弃负号只保留绝对值；"
+    "无括号数值保持原样输出正数。"
     "scope 字段只能是「合并」或「母公司」；period 字段只能是「本期」「上期」"
     "「本年累计」「上年同期」。"
-    "item 字段只填科目名称：去掉行号编号（如“一、”“（一）”“1.”）、行性质前缀"
+    "item 字段只填科目名称：去掉行号编号（如“一、”“（一）”“(一)”“1.”）、行性质前缀"
     "（如“减：”“加：”“其中：”）、括号注释（如“（损失以“－”号填列）”）以及"
     "名称内多余空格。"
 )
@@ -80,7 +83,9 @@ def build_extract_prompt(
         f'目标 statement_type = "{statement_type.value}"。',
     ]
     if scope:
-        header_lines.append(f"本表为{scope}报表：所有科目的 scope 字段必须填「{scope}」。")
+        header_lines.append(
+            f"本表为{scope}报表：所有科目的 scope 字段必须填「{scope}」。"
+        )
     if report_period:
         header_lines.append(f"报告期末日：{report_period}")
     if company_code:

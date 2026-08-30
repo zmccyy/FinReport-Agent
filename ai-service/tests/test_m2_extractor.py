@@ -839,3 +839,18 @@ def test_extract_value_nan_round_trip_detection() -> None:
     with pytest.raises(ValueError):
         StatementItem(item="x", value=float("nan"))
     assert math.isnan(float("nan"))  # type: ignore[arg-type]
+
+
+def test_normalize_item_name_strips_half_width_ordinal_prefix() -> None:
+    """M6.08 评估发现 1：半角括号编号「(一)」前缀剥离（平安银行实测）。
+
+    旧正则只匹配全角「（一）」，GT 保留「(一)持续经营净利润」而预测为
+    「持续经营净利润」，严格相等匹配下镜像 FP/FN 压低平安 F1。
+    """
+    from app.modules.extractor.normalize import normalize_item_name
+
+    assert normalize_item_name("(一)持续经营净利润") == "持续经营净利润"
+    assert normalize_item_name("（一）持续经营净利润") == "持续经营净利润"
+    assert normalize_item_name("(二)其他综合收益") == "其他综合收益"
+    # 半角括号内为阿拉伯数字（附注引用）仍不剥——与前导编号语义区分。
+    assert normalize_item_name("营业收入60(1)") == "营业收入60(1)"
