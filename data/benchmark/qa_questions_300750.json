@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "description": "M6.08 问答链路评估基准 — 宁德时代 5 个标准问题（模式对齐 qa_questions.json；key_facts 由全量 GT 数值与 PDF 文本机械推导）。",
+  "target_report": {
+    "report_id": null,
+    "company": "宁德时代",
+    "company_code": "300750",
+    "report_period": "2025-12-31"
+  },
+  "acceptance": {
+    "hit_rate_min": 0.85,
+    "first_token_seconds_max": 15.0
+  },
+  "questions": [
+    {
+      "id": "q1_total_assets",
+      "question": "宁德时代2025年合并报表的资产总计是多少？",
+      "capability": "query_statement",
+      "source": "financial_statement 资产总计 本期 合并 = 974,827,544 千元",
+      "key_facts": ["974827544", "974,827,544", "9748亿", "9748.28亿", "974.83万百万"],
+      "note": "命中任意一个关键事实（金额可带千分位或约数）；文档单位为千元。"
+    },
+    {
+      "id": "q2_revenue",
+      "question": "宁德时代2025年合并利润表的营业收入是多少？",
+      "capability": "query_statement",
+      "source": "financial_statement 营业收入 本期 合并 = 423,701,834 千元",
+      "key_facts": ["423701834", "423,701,834", "4237亿", "4237.02亿"],
+      "note": "命中营业收入数值即可（营业总收入与营业收入相同）。"
+    },
+    {
+      "id": "q3_balance_check",
+      "question": "宁德时代2025年末，资产总计是否等于负债合计加所有者权益合计？",
+      "capability": "check_accounting",
+      "source": "974,827,544 = 603,801,220 + 371,026,324，恒等成立",
+      "key_facts": ["成立", "平衡", "一致", "相等", "符合", "等于", "通过"],
+      "forbid_words": ["不成立", "未通过", "不一致", "不平衡", "不相等", "存在差额", "不等于"],
+      "note": "命中任意一个表示勾稽通过的结论词即可；答案若含否定表述判未命中。"
+    },
+    {
+      "id": "q4_audit_firm",
+      "question": "宁德时代2025年度财务报表的审计机构（会计师事务所）是哪家？",
+      "capability": "search_kb",
+      "source": "年报第11/107页：致同会计师事务所（特殊普通合伙）",
+      "key_facts": ["致同"],
+      "note": "命中事务所名称即可。"
+    },
+    {
+      "id": "q5_legal_representative",
+      "question": "宁德时代的法定代表人是谁？",
+      "capability": "search_kb",
+      "source": "年报第113/133页：法定代表人为曾毓群先生",
+      "key_facts": ["曾毓群"],
+      "note": "命中人名即可。"
+    }
+  ]
+}

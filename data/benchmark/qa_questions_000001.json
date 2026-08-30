@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "description": "M6.08 问答链路评估基准 — 平安银行 5 个标准问题（模式对齐 qa_questions.json；key_facts 由全量 GT 数值与 PDF 文本机械推导）。",
+  "target_report": {
+    "report_id": null,
+    "company": "平安银行",
+    "company_code": "000001",
+    "report_period": "2025-12-31"
+  },
+  "acceptance": {
+    "hit_rate_min": 0.85,
+    "first_token_seconds_max": 15.0
+  },
+  "questions": [
+    {
+      "id": "q1_total_assets",
+      "question": "平安银行2025年合并报表的资产总计是多少？",
+      "capability": "query_statement",
+      "source": "financial_statement 资产总计 本期 合并 = 5,925,777 百万元",
+      "key_facts": ["5925777", "5,925,777", "5.93万亿", "59258亿", "5.93万亿以上"],
+      "note": "命中任意一个关键事实（金额可带千分位或约数）；文档单位为百万元。"
+    },
+    {
+      "id": "q2_revenue_total",
+      "question": "平安银行2025年合并利润表的营业收入合计是多少？",
+      "capability": "query_statement",
+      "source": "financial_statement 营业收入合计 本期 合并 = 131,442 百万元",
+      "key_facts": ["131442", "131,442", "1314亿", "1314.42亿"],
+      "note": "命中营业收入合计数值即可（银行格式科目名为营业收入合计）。"
+    },
+    {
+      "id": "q3_balance_check",
+      "question": "平安银行2025年末，资产总计是否等于负债合计加股东权益合计？",
+      "capability": "check_accounting",
+      "source": "5,925,777 = 5,374,593 + 551,184，恒等成立",
+      "key_facts": ["成立", "平衡", "一致", "相等", "符合", "等于", "通过"],
+      "forbid_words": ["不成立", "未通过", "不一致", "不平衡", "不相等", "存在差额", "不等于"],
+      "note": "命中任意一个表示勾稽通过的结论词即可；答案若含否定表述判未命中。"
+    },
+    {
+      "id": "q4_audit_firm",
+      "question": "平安银行2025年度财务报表的审计机构（会计师事务所）是哪家？",
+      "capability": "search_kb",
+      "source": "年报第10/93页：安永华明会计师事务所（特殊普通合伙）",
+      "key_facts": ["安永华明", "安永"],
+      "note": "命中事务所名称即可。"
+    },
+    {
+      "id": "q5_stock_listing",
+      "question": "平安银行的A股股票代码是什么？在哪个交易所上市？",
+      "capability": "search_kb",
+      "source": "年报公司信息：股票代码 000001，深圳证券交易所",
+      "key_facts": ["000001", "深圳证券交易所", "深交所", "深证"],
+      "note": "命中代码或交易所任一即可。"
+    }
+  ]
+}
