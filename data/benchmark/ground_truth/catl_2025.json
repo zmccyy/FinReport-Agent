@@ -1,0 +1,1012 @@
+{
+ "report_period": "2025-12-31",
+ "currency": "CNY",
+ "unit": "千元",
+ "company_code": "300750",
+ "company_name": "宁德时代",
+ "source_pdf": "300750_宁德时代：2025年年度报告.pdf",
+ "page_count": 232,
+ "statements": {
+  "balance_sheet": [
+   {
+    "item": "货币资金",
+    "value": 333512927.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "交易性金融资产",
+    "value": 58993528.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "衍生金融资产",
+    "value": 1133502.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "应收票据",
+    "value": 1380016.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "应收账款",
+    "value": 76403264.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "应收款项融资",
+    "value": 43205292.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "预付款项",
+    "value": 14282335.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "其他应收款",
+    "value": 2119770.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "应收股利",
+    "value": 77327.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "存货",
+    "value": 94526239.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "合同资产",
+    "value": 375468.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "一年内到期的非流动资产",
+    "value": 169898.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "其他流动资产",
+    "value": 12379304.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "流动资产合计",
+    "value": 638481543.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "长期应收款",
+    "value": 386180.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "长期股权投资",
+    "value": 64884321.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "其他权益工具投资",
+    "value": 16296853.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 111
+   },
+   {
+    "item": "其他非流动金融资产",
+    "value": 2882264.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "固定资产",
+    "value": 146400592.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "在建工程",
+    "value": 29733108.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "使用权资产",
+    "value": 3268966.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "无形资产",
+    "value": 15263875.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "商誉",
+    "value": 837328.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "长期待摊费用",
+    "value": 4960638.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "递延所得税资产",
+    "value": 28170283.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "其他非流动资产",
+    "value": 23261595.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "非流动资产合计",
+    "value": 336346001.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "资产总计",
+    "value": 974827544.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "短期借款",
+    "value": 12935498.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "衍生金融负债",
+    "value": 393224.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "应付票据",
+    "value": 103276999.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "应付账款",
+    "value": 160328962.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "合同负债",
+    "value": 49233377.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "应付职工薪酬",
+    "value": 23110912.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "应交税费",
+    "value": 11775019.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "其他应付款",
+    "value": 10504098.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "应付股利",
+    "value": 5400161.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "一年内到期的非流动负债",
+    "value": 22237540.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 112
+   },
+   {
+    "item": "其他流动负债",
+    "value": 5830358.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "流动负债合计",
+    "value": 399625988.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "长期借款",
+    "value": 78234935.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "应付债券",
+    "value": 3443434.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "租赁负债",
+    "value": 2805081.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "长期应付款",
+    "value": 1639608.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "预计负债",
+    "value": 85324358.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "递延收益",
+    "value": 27321553.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "递延所得税负债",
+    "value": 922254.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "其他非流动负债",
+    "value": 4484010.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "非流动负债合计",
+    "value": 204175232.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "负债合计",
+    "value": 603801220.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "股本",
+    "value": 4563803.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "资本公积",
+    "value": 156248214.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "库存股",
+    "value": 7097993.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "其他综合收益",
+    "value": 6454423.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "专项储备",
+    "value": 35515.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "盈余公积",
+    "value": 2274947.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "未分配利润",
+    "value": 174628837.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "归属于母公司所有者权益合计",
+    "value": 337107747.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "少数股东权益",
+    "value": 33918577.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "所有者权益合计",
+    "value": 371026324.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   },
+   {
+    "item": "负债和所有者权益总计",
+    "value": 974827544.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 113
+   }
+  ],
+  "income_statement": [
+   {
+    "item": "营业总收入",
+    "value": 423701834.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "营业收入",
+    "value": 423701834.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "营业总成本",
+    "value": 344824196.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "营业成本",
+    "value": 312383297.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "税金及附加",
+    "value": 2832322.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "销售费用",
+    "value": 3735118.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "管理费用",
+    "value": 11666741.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "研发费用",
+    "value": 22146581.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "财务费用",
+    "value": -7939863.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "利息费用",
+    "value": 2734017.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "利息收入",
+    "value": 10594657.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "其他收益",
+    "value": 10600477.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "投资收益",
+    "value": 7970552.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "对联营企业和合营企业的投资收益",
+    "value": 7353106.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "以摊余成本计量的金融资产终止确认收益",
+    "value": -37696.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "公允价值变动收益",
+    "value": 974079.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 116
+   },
+   {
+    "item": "信用减值损失",
+    "value": -418585.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "资产减值损失",
+    "value": -8660164.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "资产处置收益",
+    "value": 174640.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "营业利润",
+    "value": 89518636.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "营业外收入",
+    "value": 463520.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "营业外支出",
+    "value": 455611.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "利润总额",
+    "value": 89526545.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "所得税费用",
+    "value": 12740236.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "净利润",
+    "value": 76786309.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "持续经营净利润",
+    "value": 76786309.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "归属于母公司股东的净利润",
+    "value": 72201282.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "少数股东损益",
+    "value": 4585027.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "其他综合收益的税后净额",
+    "value": 7220215.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "归属母公司所有者的其他综合收益的税后净额",
+    "value": 7249870.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "不能重分类进损益的其他综合收益",
+    "value": 5323769.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "权益法下不能转损益的其他综合收益",
+    "value": 128861.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "其他权益工具投资公允价值变动",
+    "value": 5194972.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "将重分类进损益的其他综合收益",
+    "value": 1926100.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "权益法下可转损益的其他综合收益",
+    "value": 14781.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "金融资产重分类计入其他综合收益的金额",
+    "value": 15130.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "现金流量套期储备",
+    "value": 2859538.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "外币财务报表折算差额",
+    "value": -963349.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "归属于少数股东的其他综合收益的税后净额",
+    "value": -29655.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "综合收益总额",
+    "value": 84006523.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 117
+   },
+   {
+    "item": "归属于母公司所有者的综合收益总额",
+    "value": 79451151.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 118
+   },
+   {
+    "item": "归属于少数股东的综合收益总额",
+    "value": 4555372.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 118
+   },
+   {
+    "item": "基本每股收益",
+    "value": 16.14,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 118
+   },
+   {
+    "item": "稀释每股收益",
+    "value": 16.14,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 118
+   }
+  ],
+  "cash_flow": [
+   {
+    "item": "销售商品、提供劳务收到的现金",
+    "value": 477796524.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 119
+   },
+   {
+    "item": "收到的税费返还",
+    "value": 7688313.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "收到其他与经营活动有关的现金",
+    "value": 26383516.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "经营活动现金流入小计",
+    "value": 511868353.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "购买商品、接受劳务支付的现金",
+    "value": 300381833.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "支付给职工以及为职工支付的现金",
+    "value": 32789183.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "支付的各项税费",
+    "value": 34458707.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "支付其他与经营活动有关的现金",
+    "value": 11018649.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "经营活动现金流出小计",
+    "value": 378648372.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "经营活动产生的现金流量净额",
+    "value": 133219982.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "收回投资收到的现金",
+    "value": 5685583.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "取得投资收益收到的现金",
+    "value": 2280470.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "处置固定资产、无形资产和其他长期资产收回的现金净额",
+    "value": 211949.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "处置子公司及其他营业单位收到的现金净额",
+    "value": 27411.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "收到其他与投资活动有关的现金",
+    "value": 98372.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "投资活动现金流入小计",
+    "value": 8303785.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "购建固定资产、无形资产和其他长期资产支付的现金",
+    "value": 42344558.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "投资支付的现金",
+    "value": 57533827.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "取得子公司及其他营业单位支付的现金净额",
+    "value": 2053675.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "支付其他与投资活动有关的现金",
+    "value": 847516.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "投资活动现金流出小计",
+    "value": 102779575.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "投资活动产生的现金流量净额",
+    "value": -94475790.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "吸收投资收到的现金",
+    "value": 44813984.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "子公司吸收少数股东投资收到的现金",
+    "value": 6094575.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "取得借款收到的现金",
+    "value": 39790079.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "收到其他与筹资活动有关的现金",
+    "value": 1003474.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "筹资活动现金流入小计",
+    "value": 85607537.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 120
+   },
+   {
+    "item": "偿还债务支付的现金",
+    "value": 51702039.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 121
+   },
+   {
+    "item": "分配股利、利润或偿付利息支付的现金",
+    "value": 34923036.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 121
+   },
+   {
+    "item": "子公司支付给少数股东的股利、利润",
+    "value": 2302326.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 121
+   },
+   {
+    "item": "支付其他与筹资活动有关的现金",
+    "value": 5292005.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 121
+   },
+   {
+    "item": "筹资活动现金流出小计",
+    "value": 91917080.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 121
+   },
+   {
+    "item": "筹资活动产生的现金流量净额",
+    "value": -6309543.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 121
+   },
+   {
+    "item": "汇率变动对现金及现金等价物的影响",
+    "value": -2664640.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 121
+   },
+   {
+    "item": "现金及现金等价物净增加额",
+    "value": 29770008.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 121
+   },
+   {
+    "item": "期初现金及现金等价物余额",
+    "value": 270159734.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 121
+   },
+   {
+    "item": "期末现金及现金等价物余额",
+    "value": 299929741.0,
+    "scope": "合并",
+    "period": "本期",
+    "source_page": 121
+   }
+  ]
+ },
+ "notes": "M6.08 重建：由 PDF 文本层全量解析（合并+本期），科目名规范化；数值单位与文档一致（千元）"
+}

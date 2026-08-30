@@ -16,7 +16,31 @@
 
 ## 2. Ground Truth 标注
 
-### 2.1 已交付（自动提取，部分需人工核对）
+### 2.0 M6.08 全量基准（3 份缩减口径，当前有效）
+
+M6.08 以 `scripts/rebuild_gt.py`（`rebuild_moutai_gt.py` 的参数化泛化）从
+PDF 文本层重建三份全量 GT（合并+本期，科目名经 `normalize_item_name` 单源
+规范化，数值保持文档原单位）：
+
+| 文件 | 公司 | 单位 | BS | IS | CF | 重建要点 |
+|---|---|---|---|---|---|---|
+| `moutai_2025.json` | 贵州茅台 | 元 | 53 | 38 | 34 | M4.10 交付，`rebuild_gt.py` 回归 diff=0 |
+| `pingan_2025.json` | 平安银行 | 百万元 | 44 | 36 | 66 | 银行年报：母公司段标题为「银行…」；长科目名折行需 `--wrap-join`；数值为千分位整数 + 括号负数 |
+| `catl_2025.json` | 宁德时代 | 千元 | 61 | 44 | 37 | 标准编号标题；附注交叉引用需严格标题匹配 |
+
+验证方式（无需金融知识）：三份 GT 的「资产总计 = 负债合计 + 所有者权益
+（股东权益）合计」恒等式经生产勾稽规则类（`BalanceSheetIdentityRule`）
+校验 diff=0；勾稽预期结果由生产规则类跑 GT 数值得出（`eval_e2e.py` 运行时
+计算）；局限：regex/文本层自动重建、未人工逐项核对。
+
+问答基准：`qa_questions.json`（茅台，M5.09 交付）+
+`qa_questions_000001.json` / `qa_questions_300750.json`（M6.08 新增，
+5 问/家，key_facts 由 GT 数值与 PDF 文本机械推导）。
+
+端到端评估：`python scripts/eval_e2e.py`（详见脚本 docstring 与
+`docs/eval/m6-e2e-3reports.md`）。
+
+### 2.1 已交付（M2.12 历史样本，部分需人工核对）
 
 通过 `scripts/extract_ground_truth.py` 从 PDF 文本层自动提取关键科目作为 ground truth 样本（regex 提取，少量数值需人工核对）：
 
