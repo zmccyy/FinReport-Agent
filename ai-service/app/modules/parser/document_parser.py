@@ -225,7 +225,9 @@ class DocumentParser:
         if use_filter:
             self.table_page_filter.reset()
             use_filter = any(
-                self.table_page_filter.anchor_hit(doc.load_page(i).get_text("text") or "")
+                self.table_page_filter.anchor_hit(
+                    doc.load_page(i).get_text("text") or ""
+                )
                 for i in range(doc.page_count)
             )
             if not use_filter:
@@ -240,7 +242,7 @@ class DocumentParser:
         try:
             for index in range(doc.page_count):
                 raw = self._extract_page(fitz, doc, index)
-                pages.append(self._build_page(raw, use_filter))
+                pages.append(self._build_page(fitz, doc, raw, use_filter))
         finally:
             doc.close()
 
@@ -263,7 +265,11 @@ class DocumentParser:
         )
 
     def _extract_page(self, fitz: Any, doc: Any, index: int) -> _ParsedPage:
-        """Pull raw blocks, plain text, and a rendered image for one page.
+        """Pull raw blocks and plain text for one page (image lazy-rendered).
+
+        M6.08 性能债务 R4：此前每页都先渲染 200 DPI PNG（143-288 页年报
+        实测 25s+），而只有报表候选页和扫描页需要图像。文本层预扫先行，
+        ``_build_page`` 按需渲染，非候选页的渲染开销整体消除。
 
         Args:
             fitz: The PyMuPDF module.
@@ -271,20 +277,36 @@ class DocumentParser:
             index: 0-based page index.
 
         Returns:
-           A _ParsedPage carrier.
+           A _ParsedPage carrier with ``image_bytes=None``.
         """
         page = doc.load_page(index)
         raw_blocks = page.get_text("dict")["blocks"]
         text = page.get_text("text")
-        image_bytes = self._render_page(fitz, page)
         return _ParsedPage(
             index=index,
             width=float(page.rect.width),
             height=float(page.rect.height),
             blocks=raw_blocks if isinstance(raw_blocks, list) else [],
             text=text or "",
-            image_bytes=image_bytes,
+            image_bytes=None,
         )
+
+    def _render_page_index(self, fitz: Any, doc: Any, index: int) -> bytes | None:
+        """Render one page to PNG bytes at the configured DPI (lazy path).
+
+        Args:
+            fitz: The PyMuPDF module.
+            doc: Open fitz document.
+            index: 0-based page index.
+
+        Returns:
+            PNG bytes, or None if rendering fails (e.g. 页面为纯图且无文本层时).
+        """
+        try:
+            return self._render_page(fitz, doc.load_page(index))
+        except Exception:
+            LOGGER.warning("Failed to load page for rendering index=%s", index)
+            return None
 
     def _render_page(self, fitz: Any, page: Any) -> bytes | None:
         """Render the page to PNG bytes at the configured DPI.
@@ -304,10 +326,17 @@ class DocumentParser:
             LOGGER.warning("Failed to render page image index=%s", page.number)
             return None
 
-    def _build_page(self, raw: _ParsedPage, use_filter: bool = True) -> Page:
+    def _build_page(
+        self, fitz: Any, doc: Any, raw: _ParsedPage, use_filter: bool = True
+    ) -> Page:
         """Assemble a Page from text blocks plus optional layout/OCR results.
 
+        图像按需渲染（M6.08 性能债务 R4）：仅当页被判为报表候选（需布局
+        识别）或为扫描页（需 OCR）时才渲染 200 DPI PNG；其余页零渲染开销。
+
         Args:
+            fitz: The PyMuPDF module (lazy rendering).
+            doc: Open fitz document (lazy rendering).
             raw: The carrier returned by _extract_page.
             use_filter: Whether the statement-page filter applies to this
                 document (False = legacy full-page behavior, see
@@ -325,23 +354,25 @@ class DocumentParser:
         is_scanned = self._is_scanned(raw, text_blocks)
         ocr_applied = False
 
+        is_table_candidate = self._is_table_candidate(raw.index, raw.text, use_filter)
+        needs_layout = self.layout_analyzer is not None and is_table_candidate
+        needs_ocr = is_scanned and self.ocr_provider is not None
+
+        image_bytes = raw.image_bytes
+        if (needs_layout or needs_ocr) and image_bytes is None:
+            image_bytes = self._render_page_index(fitz, doc, raw.index)
+
         table_blocks: list[TableBlock] = []
-        if (
-            self.layout_analyzer is not None
-            and raw.image_bytes is not None
-            and self._is_table_candidate(raw.index, raw.text, use_filter)
-        ):
+        if needs_layout and image_bytes is not None:
             try:
-                table_blocks = self.layout_analyzer.analyze_page(
-                    raw.index, raw.image_bytes
-                )
+                table_blocks = self.layout_analyzer.analyze_page(raw.index, image_bytes)
             except Exception:
                 LOGGER.exception("Layout analyzer failed page=%d", raw.index)
                 table_blocks = []
 
-        if is_scanned and self.ocr_provider is not None and raw.image_bytes is not None:
+        if needs_ocr and image_bytes is not None:
             try:
-                text_blocks = self.ocr_provider.recognize(raw.index, raw.image_bytes)
+                text_blocks = self.ocr_provider.recognize(raw.index, image_bytes)
                 ocr_applied = True
             except Exception:
                 LOGGER.exception("OCR provider failed page=%d", raw.index)
@@ -404,7 +435,9 @@ class DocumentParser:
             return False
         return not raw.text.strip()
 
-    def _is_table_candidate(self, page_index: int, page_text: str, use_filter: bool = True) -> bool:
+    def _is_table_candidate(
+        self, page_index: int, page_text: str, use_filter: bool = True
+    ) -> bool:
         """Check whether table recognition should run on this page.
 
         Args:

@@ -228,6 +228,8 @@ services:
       # 的 reasoning 计入 max_tokens，银行年报大表抽取时 reasoning 可耗尽预算致
       # content 为空（实测 EXTRACT_CF 重试耗尽）；API 实测接受 32768。
       MODEL_MAX_NEW_TOKENS: ${MODEL_MAX_NEW_TOKENS:-32768}
+      # M6.08 性能债务 R4：抽取场景关闭推理模型思考过程（不支持时后端自动剥离）。
+      LLM_API_EXTRACT_THINKING_DISABLED: ${LLM_API_EXTRACT_THINKING_DISABLED:-true}
       # 本地 embedding 模型（bge-small-zh-v1.5，挂载于 models 卷，M4.07/M4.09）
       MODEL_EMBED_PATH: /models/bge-small-zh-v1.5
       # M4.10 表格识别页面渲染 DPI（默认 200；内存受限环境可降 150，

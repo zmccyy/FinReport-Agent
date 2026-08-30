@@ -72,6 +72,7 @@ class LlmBackend(Protocol):
         timeout_seconds: float,
         system_prompt: str | None = None,
         json_mode: bool = False,
+        thinking: bool | None = None,
     ) -> GenerateResult:
         """Run a single generate call.
 
@@ -82,6 +83,7 @@ class LlmBackend(Protocol):
             timeout_seconds: Inference SLA timeout.
             system_prompt: Optional system message (API backends).
             json_mode: Request JSON-constrained output (API backends).
+            thinking: 推理模式开关（False 关闭推理模型的思考过程，M6.08）。
 
         Returns:
             A GenerateResult carrying the decoded text and timings.
@@ -185,6 +187,7 @@ class LlmLoader:
         timeout_seconds: float | None = None,
         system_prompt: str | None = None,
         json_mode: bool = False,
+        thinking: bool | None = None,
     ) -> GenerateResult:
         """Generate a completion for ``prompt`` on the resident model.
 
@@ -195,6 +198,7 @@ class LlmLoader:
             timeout_seconds: Override SLA timeout.
             system_prompt: Optional system message (API backends).
             json_mode: Request JSON-constrained output (API backends).
+            thinking: 推理模式开关（False 关闭推理模型的思考过程，M6.08）。
 
         Returns:
             A GenerateResult from the backend.
@@ -209,9 +213,11 @@ class LlmLoader:
             prompt,
             max_new_tokens=max_new_tokens or self.settings.model_max_new_tokens,
             temperature=temperature,
-            timeout_seconds=timeout_seconds or float(self.settings.model_generate_timeout_seconds),
+            timeout_seconds=timeout_seconds
+            or float(self.settings.model_generate_timeout_seconds),
             system_prompt=system_prompt,
             json_mode=json_mode,
+            thinking=thinking,
         )
 
     def unload(self) -> None:

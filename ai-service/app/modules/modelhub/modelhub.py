@@ -106,6 +106,7 @@ class ModelHub:
         timeout_seconds: float | None = None,
         system_prompt: str | None = None,
         json_mode: bool = False,
+        thinking: bool | None = None,
     ) -> GenerateResult:
         """Generate a completion (DeepSeek API by default, M4.02).
 
@@ -119,6 +120,8 @@ class ModelHub:
             timeout_seconds: Override SLA timeout.
             system_prompt: Optional system message (API backends).
             json_mode: Request JSON-constrained output (API backends).
+            thinking: 推理模式开关（False 关闭推理模型思考过程，M6.08
+                性能债务 R4）；None 保持模型默认。
 
         Returns:
             A GenerateResult.
@@ -138,6 +141,7 @@ class ModelHub:
             timeout_seconds=timeout_seconds,
             system_prompt=system_prompt,
             json_mode=json_mode,
+            thinking=thinking,
         )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
@@ -186,7 +190,9 @@ class ModelHub:
             ModelLoadException: When the backend fails to load.
         """
         if scene not in LLM_SCENES:
-            raise AiException(f"Scene {scene.value} does not route through the LLM backend")
+            raise AiException(
+                f"Scene {scene.value} does not route through the LLM backend"
+            )
         model_key, quant = self.route(scene)
         self.load_llm(model_key, quant)
 
@@ -206,7 +212,8 @@ class ModelHub:
             "loaded_llm": loaded,
             "is_loaded": loaded is not None,
             "scenes": {
-                scene.value: {"model": k, "quant": q} for scene, (k, q) in SCENE_MODEL_MAP.items()
+                scene.value: {"model": k, "quant": q}
+                for scene, (k, q) in SCENE_MODEL_MAP.items()
             },
             "embed": {
                 "model": self.embedder.MODEL_KEY,

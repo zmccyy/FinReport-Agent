@@ -71,3 +71,7 @@ class Settings(BaseSettings):
     llm_api_model: str = "deepseek-chat"
     llm_api_max_retries: int = 2
     llm_api_retry_base_delay_seconds: float = 1.0
+    # M6.08 性能债务 R4：抽取场景关闭推理模型思考过程（实测 CF 表
+    # completion 26k tokens 中 reasoning 占 ~19k、耗时 180s）。模型不支持
+    # thinking 字段返回 400 时后端自动剥离重试，因此默认开启是安全的。
+    llm_api_extract_thinking_disabled: bool = True

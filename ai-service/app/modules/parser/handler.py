@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from app.core.config import Settings
@@ -72,6 +73,34 @@ def _resolve_object_store() -> ObjectStore:
     if _object_store is not None:
         return _object_store
     return MinioObjectClient(Settings())
+
+
+def warm_up_parser() -> bool:
+    """预热 PP-Structure 引擎（M6.08 性能债务 R4）。
+
+    引擎惰性初始化实测 ~72s（模型加载），发生在首个 PARSE 任务内直接
+    计入端到端耗时。进程启动期后台预热后，首个任务只承担推理耗时；
+    预热失败的异常吞掉记日志——首个任务仍会走惰性初始化旧路径。
+
+    Returns:
+        预热成功返回 True；失败/无需预热（无布局分析器）返回 False。
+    """
+    try:
+        parser = _resolve_parser()
+        analyzer = parser.layout_analyzer
+        ensure_engine = getattr(analyzer, "_ensure_engine", None)
+        if ensure_engine is None:
+            return False
+        started = time.monotonic()
+        ensure_engine()
+        LOGGER.info(
+            "[warm_up_parser] PP-Structure engine ready latency_ms=%.1f",
+            (time.monotonic() - started) * 1000.0,
+        )
+        return True
+    except Exception:  # noqa: BLE001 — 预热失败不阻断启动
+        LOGGER.warning("[warm_up_parser] engine warmup failed; will init lazily")
+        return False
 
 
 def _serialize_document(document: Any) -> dict[str, Any]:

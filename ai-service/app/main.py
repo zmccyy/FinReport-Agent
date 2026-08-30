@@ -40,6 +40,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.task_consumer = consumer
         consumer.start()
         chat_consumer.start()
+        # M6.08 性能债务 R4：PP-Structure 引擎惰性初始化 ~72s，提前到启动期
+        # 后台预热（仅消费者进程；预热失败不阻断启动，首个任务走惰性路径）。
+        if runtime_settings.mq_consumer_enabled:
+            from threading import Thread
+
+            from app.modules.parser.handler import warm_up_parser
+
+            Thread(target=warm_up_parser, name="parser-warmup", daemon=True).start()
         try:
             yield
         finally:

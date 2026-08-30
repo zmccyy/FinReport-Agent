@@ -76,6 +76,7 @@ class _FakeBackend:
         timeout_seconds: float,
         system_prompt: str | None = None,
         json_mode: bool = False,
+        thinking: bool | None = None,
     ) -> GenerateResult:
         """Record the call; raise generate_error or sleep, then return result."""
         import time
@@ -88,6 +89,7 @@ class _FakeBackend:
                 "timeout_seconds": timeout_seconds,
                 "system_prompt": system_prompt,
                 "json_mode": json_mode,
+                "thinking": thinking,
             }
         )
         if self.generate_error is not None:

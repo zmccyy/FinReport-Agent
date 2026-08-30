@@ -41,7 +41,10 @@ QUANT_API = "api"
 # 会使每次 generate 都 400，三步抽取全部 FAILED 且无重试。
 # M6.08：deepseek-v4-flash 实测接受 32768（reasoning 计入 max_tokens，
 # 银行年报大表抽取需更大预算，见 deploy/docker-compose.yml MODEL_MAX_NEW_TOKENS）。
-_MODEL_MAX_TOKENS_CAPS: dict[str, int] = {"deepseek-chat": 8192, "deepseek-v4-flash": 32768}
+_MODEL_MAX_TOKENS_CAPS: dict[str, int] = {
+    "deepseek-chat": 8192,
+    "deepseek-v4-flash": 32768,
+}
 
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
@@ -110,6 +113,7 @@ class DeepSeekBackend:
         timeout_seconds: float,
         system_prompt: str | None = None,
         json_mode: bool = False,
+        thinking: bool | None = None,
     ) -> GenerateResult:
         """Call ``POST /chat/completions`` and return the decoded text.
 
@@ -120,6 +124,11 @@ class DeepSeekBackend:
             timeout_seconds: Request timeout (overrides the client default).
             system_prompt: Optional system message prepended to the payload.
             json_mode: When True, request ``response_format=json_object``.
+            thinking: 推理模式开关（M6.08 性能债务 R4）：``False`` 时请求体
+                携带 ``{"thinking": {"type": "disabled"}}`` 关闭推理模型的
+                思考过程（实测抽取 180s → 大幅下降，reasoning 占 completion
+                约 73%）；None 不传该字段。模型不支持该字段返回 400 时自动
+                剥离后原 attempt 重试一次。
 
         Returns:
             A GenerateResult with usage stats from the API response.
@@ -152,6 +161,7 @@ class DeepSeekBackend:
             temperature=temperature,
             system_prompt=system_prompt,
             json_mode=json_mode,
+            thinking=thinking,
         )
 
         max_attempts = max(0, self.settings.llm_api_max_retries) + 1
@@ -161,12 +171,25 @@ class DeepSeekBackend:
         for attempt in range(1, max_attempts + 1):
             model = self.settings.llm_api_model
             try:
-                response = self._client.post(
-                    "/chat/completions",
-                    json=payload,
-                    timeout=timeout_seconds,
-                )
-                response.raise_for_status()
+                try:
+                    response = self._post_chat(payload, timeout_seconds)
+                except httpx.HTTPStatusError as error:
+                    # thinking 字段不被当前模型支持（400 不在可重试状态集）：
+                    # 剥离该字段后按当前 attempt 原地重试一次，其余 4xx 照旧。
+                    if error.response.status_code == 400 and "thinking" in payload:
+                        LOGGER.warning(
+                            "[DeepSeekBackend] model %s rejected thinking field; "
+                            "retrying without it",
+                            model,
+                        )
+                        payload = {
+                            key: value
+                            for key, value in payload.items()
+                            if key != "thinking"
+                        }
+                        response = self._post_chat(payload, timeout_seconds)
+                    else:
+                        raise
                 latency_ms = (time.perf_counter() - start) * 1000.0
                 result = self._parse_response(response, latency_ms)
                 metrics.LLM_CALLS_TOTAL.labels(model=model, outcome="ok").inc()
@@ -228,6 +251,18 @@ class DeepSeekBackend:
             f"DeepSeek API failed after {max_attempts} attempts: {last_error}"
         )
 
+    def _post_chat(
+        self, payload: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        """Issue one ``/chat/completions`` POST and raise on HTTP errors."""
+        response = self._client.post(
+            "/chat/completions",
+            json=payload,
+            timeout=timeout_seconds,
+        )
+        response.raise_for_status()
+        return response
+
     def unload(self) -> None:
         """Close the HTTP client (no device memory to free)."""
         if self._client is not None:
@@ -250,6 +285,7 @@ class DeepSeekBackend:
         temperature: float,
         system_prompt: str | None,
         json_mode: bool,
+        thinking: bool | None = None,
     ) -> dict[str, Any]:
         """Assemble the OpenAI-compatible request body.
 
@@ -259,6 +295,8 @@ class DeepSeekBackend:
             temperature: Sampling temperature.
             system_prompt: Optional system message.
             json_mode: Whether to request JSON-constrained output.
+            thinking: ``False`` 时携带 ``{"type": "disabled"}`` 关闭推理
+                （M6.08 性能债务 R4）；None 不传该字段保持模型默认。
 
         Returns:
             The JSON-serializable request payload.
@@ -277,6 +315,8 @@ class DeepSeekBackend:
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        if thinking is False:
+            payload["thinking"] = {"type": "disabled"}
         return payload
 
     @staticmethod

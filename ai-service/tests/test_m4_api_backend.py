@@ -321,3 +321,82 @@ def test_route_when_api_pivot_scenes_route_to_deepseek() -> None:
     assert hub.route(Scene.EXTRACT) == ("deepseek-chat", QUANT_API)
     assert hub.route(Scene.REASON) == ("deepseek-chat", QUANT_API)
     assert hub.route(Scene.EMBED) == ("bge", "cpu")
+
+
+# ---------------------------------------------------------------------------
+# M6.08 thinking 开关（性能债务 R4）：抽取场景关闭推理模型思考过程
+# ---------------------------------------------------------------------------
+
+
+def test_generate_thinking_false_injects_disabled_field() -> None:
+    """thinking=False → 请求体携带 {"thinking": {"type": "disabled"}}。"""
+    recorder = _TransportRecorder(httpx.Response(200, json=_ok_body("数据")))
+    backend = _backend(recorder)
+
+    backend.generate(
+        "抽取",
+        max_new_tokens=1024,
+        temperature=0.0,
+        timeout_seconds=30.0,
+        thinking=False,
+    )
+
+    payload = json.loads(recorder.requests[0].content)
+    assert payload["thinking"] == {"type": "disabled"}
+
+
+def test_generate_thinking_none_omits_field() -> None:
+    """thinking=None（默认）→ 请求体不携带 thinking 字段，保持模型默认。"""
+    recorder = _TransportRecorder(httpx.Response(200, json=_ok_body("数据")))
+    backend = _backend(recorder)
+
+    backend.generate(
+        "抽取", max_new_tokens=1024, temperature=0.0, timeout_seconds=30.0
+    )
+
+    payload = json.loads(recorder.requests[0].content)
+    assert "thinking" not in payload
+
+
+def test_generate_strips_thinking_field_on_model_400() -> None:
+    """模型不支持 thinking 字段（400）→ 剥离后原 attempt 原地重试一次。
+
+    400 不在可重试状态集——剥离重试是 thinking 字段的安全降级路径，
+    其余 4xx 仍直接抛 AiException。
+    """
+    recorder = _TransportRecorder(
+        httpx.Response(400, json={"error": {"message": "Unknown field: thinking"}}),
+        httpx.Response(200, json=_ok_body("降级成功")),
+    )
+    backend = _backend(recorder)
+
+    result = backend.generate(
+        "抽取",
+        max_new_tokens=1024,
+        temperature=0.0,
+        timeout_seconds=30.0,
+        thinking=False,
+    )
+
+    assert result.text == "降级成功"
+    assert len(recorder.requests) == 2
+    first_payload = json.loads(recorder.requests[0].content)
+    second_payload = json.loads(recorder.requests[1].content)
+    assert "thinking" in first_payload
+    assert "thinking" not in second_payload
+
+
+def test_generate_other_4xx_still_raises_with_thinking() -> None:
+    """与 thinking 无关的 4xx（如 401）不触发剥离重试，直接抛错。"""
+    recorder = _TransportRecorder(httpx.Response(401, json={"error": "bad key"}))
+    backend = _backend(recorder)
+
+    with pytest.raises(AiException):
+        backend.generate(
+            "抽取",
+            max_new_tokens=1024,
+            temperature=0.0,
+            timeout_seconds=30.0,
+            thinking=False,
+        )
+    assert len(recorder.requests) == 1

@@ -81,7 +81,9 @@ _REPORT_TYPE_SUFFIX = {
     "第三季度报告": "09-30",
     "年度报告": "12-31",
 }
-_REPORT_TITLE_RE = re.compile(r"(20\d{2})\s*年.*?(第[一二三]季度报告|半年度报告|年度报告)")
+_REPORT_TITLE_RE = re.compile(
+    r"(20\d{2})\s*年.*?(第[一二三]季度报告|半年度报告|年度报告)"
+)
 
 # 报表类型 → 页级合并/母公司报表标题（定位报表段区间）。
 _MERGED_TITLES: dict[str, str] = {
@@ -102,7 +104,9 @@ _PARENT_TITLES: dict[str, str] = {
 # 合并报表，把银行口径表格并入合并段。
 _BANK_TITLES: tuple[str, ...] = ("银行资产负债表", "银行利润表", "银行现金流量表")
 _ALL_TITLES: tuple[str, ...] = (
-    *_MERGED_TITLES.values(), *_PARENT_TITLES.values(), *_BANK_TITLES,
+    *_MERGED_TITLES.values(),
+    *_PARENT_TITLES.values(),
+    *_BANK_TITLES,
 )
 # H1 兜底：无任何终止标题时按关键词密度收窄段尾的硬上限（起始页之后
 # 允许的最大跨页数；三表实际跨度 2-4 页，7 页留余量并约束 prompt 体积）。
@@ -136,6 +140,9 @@ class _CountingHub:
     职责二：M2.09 契约的 ``retried`` 字段表示本次抽取是否经历 validator
     重试，``extract_with_retry`` 不暴露尝试轮次，通过计数推断
     （一次 generate = 首抽，>1 = 发生过重试）。
+    职责三（M6.08 性能债务 R4）：抽取场景关闭推理模型思考过程——
+    机械转写任务，实测 reasoning 占 completion ~73%、单表 180s，
+    关闭后大幅缩短且模型不支持时后端自动剥离降级。
     """
 
     def __init__(self, hub: ModelHub) -> None:
@@ -147,6 +154,9 @@ class _CountingHub:
         """Delegate to the wrapped hub, forcing json_mode and counting."""
         self.calls += 1
         kwargs.setdefault("json_mode", True)
+        # getattr 防御：单测注入的 fake hub settings 可能没有该新字段。
+        if getattr(self.settings, "llm_api_extract_thinking_disabled", False):
+            kwargs.setdefault("thinking", False)
         return self._hub.generate(prompt, **kwargs)
 
 
@@ -240,7 +250,9 @@ def _html_from_text_blocks(page: Page, min_y0: float = 0.0) -> str | None:
             continue
         if re.search(r"\d{1,3} / \d{1,3}", text) or "年度报告" in text:
             continue
-        if any(marker in text for marker in ("公司负责人", "单位：元", "币种", "每股收益")):
+        if any(
+            marker in text for marker in ("公司负责人", "单位：元", "币种", "每股收益")
+        ):
             continue
         match = _NUM_VALUE_RE.search(text)
         if not match:
@@ -484,11 +496,15 @@ def _fetch_document(store: ObjectStore, task_id: str) -> Document:
         AiException: 产物缺失或 schema 不匹配。
     """
     settings = Settings()
-    raw = store.fetch_bytes(parsed_object_key(task_id), bucket=settings.minio_artifact_bucket)
+    raw = store.fetch_bytes(
+        parsed_object_key(task_id), bucket=settings.minio_artifact_bucket
+    )
     try:
         return Document.model_validate_json(raw)
     except ValidationError as error:
-        raise AiException(f"parse artifact schema mismatch taskId={task_id}: {error}") from error
+        raise AiException(
+            f"parse artifact schema mismatch taskId={task_id}: {error}"
+        ) from error
 
 
 async def handle(message: TaskMessage) -> dict[str, Any]:
@@ -579,7 +595,9 @@ def _build_payload(
     """
     return {
         "success": result.success,
-        "statement": (result.statement.model_dump(mode="json") if result.statement else {}),
+        "statement": (
+            result.statement.model_dump(mode="json") if result.statement else {}
+        ),
         "validation": {
             "is_valid": validation.is_valid,
             "issues": [issue.model_dump() for issue in validation.issues],
