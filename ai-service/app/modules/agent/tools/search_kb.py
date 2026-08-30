@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Protocol
 
 from app.modules.agent.tool_registry import ToolSpec
@@ -30,9 +31,15 @@ class Embedder(Protocol):
 class _MilvusSearcher:
     """惰性连接 Milvus 的检索器（进程内复用连接，MilvusClient 2.4+）。"""
 
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(self, host: str, port: int, company_code: str = "") -> None:
         self.host = host
         self.port = port
+        # 公司过滤（M6.08 评估发现 2）：非空时检索表达式限定公司代码，
+        # 防止多公司共库的跨公司污染（审计机构类问题答出别家公司）。
+        self.company_code = re.sub(r"[^0-9A-Za-z]", "", company_code)
+        self._filter = (
+            f'company_code == "{self.company_code}"' if self.company_code else ""
+        )
         self._client: Any = None
 
     def search(self, vector: list[float], top_k: int) -> list[dict[str, Any]]:
@@ -49,6 +56,7 @@ class _MilvusSearcher:
             collection_name=COLLECTION_NAME,
             data=[vector],
             limit=top_k,
+            filter=self._filter or None,
             search_params={"metric_type": "IP", "params": SEARCH_PARAMS},
             output_fields=["text", "page", "doc_id", "chunk_type"],
         )
@@ -72,17 +80,20 @@ def make_search_kb(
     *,
     milvus_host: str = "localhost",
     milvus_port: int = 19530,
+    company_code: str = "",
 ) -> ToolSpec:
     """构建 search_kb 工具。
 
     Args:
         embedder: 向量编码器（ModelHub.embed 注入）。
         milvus_host/milvus_port: Milvus 地址（默认本地开发栈）。
+        company_code: 公司过滤键（对话绑定报表的公司代码）；非空时检索
+            限定该公司年报的段落（M6.08 评估发现 2），空串不过滤。
 
     Returns:
         ToolSpec；handler 入参 ``{"keywords"}``。
     """
-    searcher = _MilvusSearcher(milvus_host, milvus_port)
+    searcher = _MilvusSearcher(milvus_host, milvus_port, company_code=company_code)
 
     def handler(arguments: dict) -> dict:
         keywords = str(arguments.get("keywords") or "").strip()
@@ -101,12 +112,19 @@ def make_search_kb(
                 "知识库需 M5.07 构建（Milvus fin_kb）后可用，请基于报表数据回答"
             )
         if not hits:
-            return ok_null(f"知识库未检索到与 {keywords!r} 相关的段落")
+            return ok_null(
+                f"知识库未检索到与 {keywords!r} 相关的段落"
+                + (
+                    f"（已限定公司 {searcher.company_code}）"
+                    if searcher.company_code
+                    else ""
+                )
+            )
         return ok_data({"query": keywords, "hits": hits})
 
     return ToolSpec(
         name="search_kb",
-        description="在财报知识库中检索与关键词相关的段落（含页码与来源）",
+        description="在本公司年报知识库中检索与关键词相关的段落（含页码与来源）",
         parameters={
             "type": "object",
             "properties": {

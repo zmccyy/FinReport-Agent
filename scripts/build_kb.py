@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +57,29 @@ class BuildStats:
 
 def _pdf_md5(pdf_bytes: bytes) -> str:
     return hashlib.md5(pdf_bytes).hexdigest()
+
+
+def _resolve_company_code(mysql_conn: Any, pdf_md5: str, source: str) -> str:
+    """解析 PDF 所属公司代码（Milvus/MySQL company_code 过滤键，M6.08）。
+
+    优先按 pdf_md5 匹配 report 表取 company_code（与解析入库链路同源）；
+    匹配不到（脚本独立跑 sample）时回退文件名前缀的 6 位 A 股代码
+    （如 000001_平安银行_2025年年度报告.pdf → 000001）。
+
+    Returns:
+        公司代码字符串；两种途径都失败返回空串（检索侧不过滤该块）。
+    """
+    if mysql_conn is not None:
+        with mysql_conn.cursor() as cursor:
+            cursor.execute("SELECT company_code FROM report WHERE pdf_md5 = %s", (pdf_md5,))
+            row = cursor.fetchone()
+        if row and row[0]:
+            return str(row[0])
+    match = re.match(r"^(\d{6})", Path(source).name)
+    if match:
+        return match.group(1)
+    print(f"[WARN] {source} 无法解析公司代码（report 表未命中且文件名无 6 位前缀）")
+    return ""
 
 
 def _resolve_doc_id(mysql_conn: Any, pdf_md5: str, source: str) -> int:
@@ -138,17 +162,25 @@ def _ensure_collection(client: Any, host: str, port: int) -> None:
         params={"M": 16, "efConstruction": 200},
         index_name="emb_idx",
     )
+    # 标量字段过滤检索（M6.08）：company_code 等值过滤需要独立标量索引。
+    index_params.add_index(
+        field_name="company_code",
+        index_type="INVERTED",
+        index_name="company_code_idx",
+    )
     client.create_index(collection_name=COLLECTION_NAME, index_params=index_params)
     print(f"[INFO] fin_kb 已重建（{host}:{port}）")
 
 
-def _insert_mysql(mysql_conn: Any, rows: list[tuple[Any, ...]], doc_id: int) -> None:
+def _insert_mysql(mysql_conn: Any, rows: list[tuple[Any, ...]]) -> None:
     """写 MySQL kb_chunks 元数据（幂等：按 doc_id 先删后插）。"""
+    doc_ids = {row[1] for row in rows}
     with mysql_conn.cursor() as cursor:
-        cursor.execute("DELETE FROM kb_chunks WHERE doc_id = %s", (doc_id,))
+        for doc_id in doc_ids:
+            cursor.execute("DELETE FROM kb_chunks WHERE doc_id = %s", (doc_id,))
         cursor.executemany(
-            "INSERT INTO kb_chunks (doc_id, chunk_id, chunk_type, text, page, position)"
-            " VALUES (%s, %s, %s, %s, %s, %s)",
+            "INSERT INTO kb_chunks (doc_id, company_code, chunk_id, chunk_type,"
+            " text, page, position) VALUES (%s, %s, %s, %s, %s, %s, %s)",
             rows,
         )
     mysql_conn.commit()
@@ -175,12 +207,16 @@ def build_one(
         return BuildStats(pdf_path.name, 0, document.page_count, 0)
 
     doc_id = _resolve_doc_id(mysql_conn, _pdf_md5(pdf_bytes), pdf_path.name)
+    company_code = _resolve_company_code(mysql_conn, _pdf_md5(pdf_bytes), pdf_path.name)
+    if company_code:
+        print(f"      company_code={company_code}")
 
     # 批量 embedding（bge-small-zh-v1.5 CPU，512 维归一化）。
     vectors = embed_fn([c.text for c in chunks])
     rows = [
         {
             "doc_id": doc_id,
+            "company_code": company_code,
             "chunk_id": _chunk_id(doc_id, chunk),
             "embedding": vector,
             "page": chunk.page,
@@ -193,6 +229,7 @@ def build_one(
     mysql_rows = [
         (
             doc_id,
+            company_code,
             _chunk_id(doc_id, chunk),
             chunk.chunk_type,
             chunk.text,
@@ -206,7 +243,7 @@ def build_one(
 
     client = MilvusClient(uri=f"http://{milvus_host}:{milvus_port}", timeout=30)
     _insert_milvus(client, rows)
-    _insert_mysql(mysql_conn, mysql_rows, doc_id)
+    _insert_mysql(mysql_conn, mysql_rows)
     return BuildStats(pdf_path.name, doc_id, document.page_count, len(chunks))
 
 

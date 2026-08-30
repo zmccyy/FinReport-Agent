@@ -132,12 +132,19 @@ class TestMilvusCollection:
         spec.loader.exec_module(module)
         return module
 
-    def test_fields_have_eight_entries(self):
-        """fin_kb collection 应有恰好 8 个字段。"""
+    def test_fields_have_nine_entries(self):
+        """fin_kb collection 应有恰好 9 个字段（M6.08 新增 company_code）。"""
         module = self._load_schema_module()
         assert (
-            len(module.FIELD_SPECS) == 8
-        ), f"期望 8 个字段，实际 {len(module.FIELD_SPECS)}"
+            len(module.FIELD_SPECS) == 9
+        ), f"期望 9 个字段，实际 {len(module.FIELD_SPECS)}"
+
+    def test_company_code_field_present(self):
+        """M6.08 评估发现 2：company_code 过滤键字段应存在且为 VARCHAR。"""
+        module = self._load_schema_module()
+        spec = next(f for f in module.FIELD_SPECS if f["name"] == "company_code")
+        assert spec["dtype"] == "VARCHAR"
+        assert spec["max_length"] >= 6
 
     def test_embedding_dim_is_512(self):
         """embedding 向量维度应为 512（bge-small 输出）。"""

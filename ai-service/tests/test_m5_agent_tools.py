@@ -11,7 +11,7 @@ from app.modules.agent.tools.check_accounting import make_check_accounting
 from app.modules.agent.tools.compute_qoq import make_compute_qoq
 from app.modules.agent.tools.compute_yoy import make_compute_yoy
 from app.modules.agent.tools.query_statement import make_query_statement
-from app.modules.agent.tools.search_kb import make_search_kb
+from app.modules.agent.tools.search_kb import _MilvusSearcher, make_search_kb
 from app.modules.agent.tools.unit_convert import make_unit_convert
 from app.schemas.reasoning import Anomaly, CheckResult, RuleResult, RuleType
 
@@ -278,6 +278,66 @@ def test_search_kb_returns_hits(monkeypatch: pytest.MonkeyPatch) -> None:
     hits = result["data"]["hits"]
     assert hits[0]["score"] == pytest.approx(0.9123)
     assert hits[0]["page"] == 6
+
+
+def test_search_kb_company_filter_injects_milvus_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M6.08 评估发现 2：绑定公司代码 → 检索表达式按公司过滤。"""
+
+    captured: dict[str, Any] = {}
+
+    class FakeMilvusClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def load_collection(self, *args, **kwargs) -> None:
+            pass
+
+        def search(self, *args, **kwargs):
+            captured["filter"] = kwargs.get("filter")
+            return [[]]
+
+    monkeypatch.setattr("pymilvus.MilvusClient", FakeMilvusClient)
+    tool = make_search_kb(
+        FakeEmbedder(), milvus_host="localhost", milvus_port=19530,
+        company_code="300750",
+    )
+    result = tool.handler({"keywords": "审计机构"})
+    assert result["ok"] is True
+    assert captured["filter"] == 'company_code == "300750"'
+
+
+def test_search_kb_no_company_code_skips_filter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """未绑定公司代码（空串）→ 检索不过滤（兼容旧数据）。"""
+
+    captured: dict[str, Any] = {}
+
+    class FakeMilvusClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def load_collection(self, *args, **kwargs) -> None:
+            pass
+
+        def search(self, *args, **kwargs):
+            captured["filter"] = kwargs.get("filter")
+            return [[]]
+
+    monkeypatch.setattr("pymilvus.MilvusClient", FakeMilvusClient)
+    tool = make_search_kb(FakeEmbedder())
+    result = tool.handler({"keywords": "审计机构"})
+    assert result["ok"] is True
+    assert captured["filter"] is None
+
+
+def test_search_kb_company_code_sanitized() -> None:
+    """公司代码中的非法字符被剥离（防表达式注入）。"""
+    searcher = _MilvusSearcher("localhost", 19530, company_code='30075" or "x')
+    assert searcher.company_code == "30075orx"
+    assert searcher._filter == 'company_code == "30075orx"'
 
 
 # ---------------------------------------------------------------------------

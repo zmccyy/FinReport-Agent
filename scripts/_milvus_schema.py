@@ -40,6 +40,14 @@ FIELD_SPECS = [
         "description": "关联 report.id 或文件名派生 id",
     },
     {
+        # M6.08 评估发现 2：多公司共库检索需按公司过滤（对话绑定报表的
+        # 公司代码），否则审计机构类事实问题跨公司污染。
+        "name": "company_code",
+        "dtype": "VARCHAR",
+        "max_length": 16,
+        "description": "公司代码（6 位 A 股代码；检索过滤键）",
+    },
+    {
         "name": "chunk_id",
         "dtype": "VARCHAR",
         "max_length": 64,
